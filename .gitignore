@@ -21,6 +21,3 @@ nbdist/
 nbactions.xml
 nb-configuration.xml
 META-INF/
-
-## Ignore files created by Mac OS X
-*.DS_Store
