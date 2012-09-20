@@ -24,7 +24,8 @@
         xmlns:mods="http://www.loc.gov/mods/v3"
         xmlns:dc="http://purl.org/dc/elements/1.1/"
         xmlns="http://www.w3.org/1999/xhtml"
-        exclude-result-prefixes="mets xlink xsl dim xhtml mods dc">
+        xmlns:confman="org.dspace.core.ConfigurationManager"
+        exclude-result-prefixes="mets xlink xsl dim xhtml mods dc confman">
     
     <xsl:output indent="yes"/>
     
@@ -228,7 +229,25 @@
                                           return true;
                                 }
             </script>
-            
+
+            <!-- add "shared" javascript from static, path is relative to webapp root -->
+            <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='javascript'][@qualifier='url']">
+                <script type="text/javascript">
+                    <xsl:attribute name="src">
+                        <xsl:value-of select="."/>
+                    </xsl:attribute>&#160;</script>
+            </xsl:for-each>
+
+            <!-- add "shared" javascript from static, path is relative to webapp root -->
+            <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='javascript'][@qualifier='static']">
+                <script type="text/javascript">
+                    <xsl:attribute name="src">
+                        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='contextPath'][not(@qualifier)]"/>
+                        <xsl:text>/</xsl:text>
+                        <xsl:value-of select="."/>
+                    </xsl:attribute>&#160;</script>
+            </xsl:for-each>
+
             <!-- Add theme javascipt  -->
             <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='javascript'][not(@qualifier)]">
                 <script type="text/javascript">
@@ -236,16 +255,6 @@
                         <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='contextPath'][not(@qualifier)]"/>
                         <xsl:text>/themes/</xsl:text>
                         <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='theme'][@qualifier='path']"/>
-                        <xsl:text>/</xsl:text>
-                        <xsl:value-of select="."/>
-                    </xsl:attribute>&#160;</script>
-            </xsl:for-each>
-            
-            <!-- add "shared" javascript from static, path is relative to webapp root -->
-            <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='javascript'][@qualifier='static']">
-                <script type="text/javascript">
-                    <xsl:attribute name="src">
-                        <xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='contextPath'][not(@qualifier)]"/>
                         <xsl:text>/</xsl:text>
                         <xsl:value-of select="."/>
                     </xsl:attribute>&#160;</script>
@@ -2954,10 +2963,16 @@
     </xsl:template>
     
     <xsl:template match="dri:reference" mode="summaryView">
+        <xsl:variable name='METSRIGHTS-enabled' select="contains(confman:getProperty('plugin.named.org.dspace.content.crosswalk.DisseminationCrosswalk'), 'METSRIGHTS')" />
         <xsl:variable name="externalMetadataURL">
             <xsl:text>cocoon:/</xsl:text>
             <xsl:value-of select="@url"/>
-            <!-- No options selected, render the full METS document -->
+            <!-- If this is an Item, display the METSRIGHTS section, so we
+                 know which files have access restrictions.
+                 This requires the METSRightsCrosswalk to be enabled! -->
+            <xsl:if test="@type='DSpace Item' and $METSRIGHTS-enabled">
+                <xsl:text>?rightsMDTypes=METSRIGHTS</xsl:text>
+            </xsl:if>
         </xsl:variable>
         <xsl:comment> External Metadata URL: <xsl:value-of select="$externalMetadataURL"/> </xsl:comment>
         <xsl:apply-templates select="document($externalMetadataURL)" mode="summaryView"/>

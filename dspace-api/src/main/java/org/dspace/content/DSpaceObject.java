@@ -9,6 +9,7 @@ package org.dspace.content;
 
 import java.sql.SQLException;
 
+import org.dspace.authorize.AuthorizeException;
 import org.dspace.core.Constants;
 import org.dspace.core.Context;
 import org.dspace.eperson.EPerson;
@@ -64,6 +65,15 @@ public abstract class DSpaceObject
      * @return type of the object
      */
     public abstract int getType();
+
+    /**
+     * Provide the text name of the type of this DSpaceObject. It is most likely all uppercase.
+     * @return Object type as text
+     */
+    public String getTypeText()
+    {
+        return Constants.typeText[this.getType()];
+    }
 
     /**
      * Get the internal ID (database primary key) of this object
@@ -161,6 +171,8 @@ public abstract class DSpaceObject
     {
         return null;
     }
+
+    public abstract void update() throws SQLException, AuthorizeException;
 
     public abstract void updateLastModified();
 }

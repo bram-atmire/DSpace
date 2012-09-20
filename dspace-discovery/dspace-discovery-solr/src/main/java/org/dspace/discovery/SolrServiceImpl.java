@@ -33,6 +33,9 @@ import org.apache.solr.common.params.MoreLikeThisParams;
 import org.apache.solr.common.util.NamedList;
 import org.dspace.content.*;
 import org.dspace.content.Collection;
+import org.dspace.content.authority.ChoiceAuthorityManager;
+import org.dspace.content.authority.Choices;
+import org.dspace.content.authority.MetadataAuthorityManager;
 import org.dspace.core.*;
 import org.dspace.discovery.configuration.*;
 import org.dspace.handle.HandleManager;
@@ -74,6 +77,12 @@ public class SolrServiceImpl implements SearchService, IndexingService {
 
     public static final String FILTER_SEPARATOR = "\n|||\n";
 
+    public static final String AUTHORITY_SEPARATOR = "###";
+    
+    public static final String STORE_SEPARATOR = "\n|||\n";
+    
+    public static final String VARIANTS_STORE_SEPARATOR = "###";
+    
     /**
      * Non-Static CommonsHttpSolrServer for processing indexing events.
      */
@@ -141,7 +150,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
             {
                 case Constants.ITEM:
                     Item item = (Item) dso;
-                    if (item.isArchived() && !item.isWithdrawn())
+                    if (item.isArchived() || item.isWithdrawn())
                     {
                         /**
                          * If the item is in the repository now, add it to the index
@@ -155,9 +164,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     } else {
                         /**
                          * Make sure the item is not in the index if it is not in
-                         * archive. TODO: Someday DSIndexer should block withdrawn
-                         * content on search/retrieval and allow admins the ability
-                         * to still search for withdrawn Items.
+                         * archive or withwrawn.
                          */
                         unIndexContent(context, handle);
                         log.info("Removed Item: " + handle + " from Index");
@@ -186,8 +193,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
     }
 
     /**
-     * unIndex removes an Item, Collection, or Community only works if the
-     * DSpaceObject has a handle (uses the handle for its unique ID)
+     * unIndex removes an Item, Collection, or Community
      *
      * @param context
      * @param dso     DSpace Object, can be Community, Item, or Collection
@@ -196,10 +202,32 @@ public class SolrServiceImpl implements SearchService, IndexingService {
      */
     public void unIndexContent(Context context, DSpaceObject dso)
             throws SQLException, IOException {
+        unIndexContent(context, dso, false);
+    }
+
+    /**
+     * unIndex removes an Item, Collection, or Community
+     *
+     * @param context
+     * @param dso     DSpace Object, can be Community, Item, or Collection
+     * @param commit if <code>true</code> force an immediate commit on SOLR
+     * @throws SQLException
+     * @throws IOException
+     */
+    public void unIndexContent(Context context, DSpaceObject dso, boolean commit)
+            throws SQLException, IOException {
         try {
-            unIndexContent(context, dso.getHandle());
-        } catch (Exception exception)
-        {
+            if (dso == null)
+            {
+                return;
+            }
+            String uniqueID = dso.getType()+"-"+dso.getID();
+            getSolr().deleteById(uniqueID);
+            if(commit)
+            {
+                getSolr().commit();
+            }
+        } catch (Exception exception) {
             log.error(exception.getMessage(), exception);
             emailException(exception);
         }
@@ -227,7 +255,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
             throws SQLException, IOException {
 
         try {
-            getSolr().deleteById(handle);
+            getSolr().deleteByQuery("handle:\""+handle+"\"");
             if(commit)
             {
                 getSolr().commit();
@@ -298,7 +326,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         try {
             ItemIterator items = null;
             try {
-                for (items = Item.findAll(context); items.hasNext();)
+                for (items = Item.findAllUnfiltered(context); items.hasNext();) 
                 {
                     Item item = items.next();
                     indexContent(context, item, force);
@@ -353,10 +381,10 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         {
             if (force)
             {
-                getSolr().deleteByQuery("*:*");
+                getSolr().deleteByQuery("search.resourcetype:[2 TO 4]");
             } else {
                 SolrQuery query = new SolrQuery();
-                query.setQuery("*:*");
+                query.setQuery("search.resourcetype:[2 TO 4]");
                 QueryResponse rsp = getSolr().query(query);
                 SolrDocumentList docs = rsp.getResults();
 
@@ -721,8 +749,11 @@ public class SolrServiceImpl implements SearchService, IndexingService {
 
         SolrInputDocument doc = buildDocument(Constants.ITEM, item.getID(), handle,
                 locations);
-
+        
         log.debug("Building Item: " + handle);
+
+        doc.addField("withdrawn", item.isWithdrawn());
+        doc.addField("discoverable", item.isDiscoverable());
 
         //Keep a list of our sort values which we added, sort values can only be added once
         List<String> sortFieldsAdded = new ArrayList<String>();
@@ -780,7 +811,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     {
                         hitHighlightingFields.add(fieldConfiguration.getField());
                     }
-                }
+            	}
                 DiscoveryMoreLikeThisConfiguration moreLikeThisConfiguration = discoveryConfiguration.getMoreLikeThisConfiguration();
                 if(moreLikeThisConfiguration != null)
                 {
@@ -805,6 +836,19 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     toIgnoreFields.add(ignoreFieldsString);
                 }
             }
+            
+            List<String> toProjectionFields = new ArrayList<String>();
+            String projectionFieldsString = new DSpace().getConfigurationService().getProperty("discovery.index.projection");
+            if(projectionFieldsString != null){
+                if(projectionFieldsString.indexOf(",") != -1){
+                    for (int i = 0; i < projectionFieldsString.split(",").length; i++) {
+                        toProjectionFields.add(projectionFieldsString.split(",")[i].trim());
+                    }
+                } else {
+                    toProjectionFields.add(projectionFieldsString);
+                }
+            }
+            
             DCValue[] mydc = item.getMetadata(Item.ANY, Item.ANY, Item.ANY, Item.ANY);
             for (DCValue meta : mydc)
             {
@@ -813,7 +857,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
 
                 String value = meta.value;
 
-                if (value == null)
+                if (value == null) 
                 {
                     continue;
                 }
@@ -823,11 +867,82 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     field += "." + meta.qualifier;
                 }
 
-
                 //We are not indexing provenance, this is useless
                 if (toIgnoreFields.contains(field) || toIgnoreFields.contains(unqualifiedField + "." + Item.ANY))
                 {
                     continue;
+                }
+                
+                String authority = null;
+                String preferedLabel = null;
+                List<String> variants = null;
+                boolean isAuthorityControlled = MetadataAuthorityManager
+                        .getManager().isAuthorityControlled(meta.schema,
+                                meta.element,
+                                meta.qualifier);
+
+                int minConfidence = isAuthorityControlled?MetadataAuthorityManager
+                        .getManager().getMinConfidence(
+                                meta.schema,
+                                meta.element,
+                                meta.qualifier):Choices.CF_ACCEPTED;
+                                
+                if (isAuthorityControlled && meta.authority != null
+                        && meta.confidence >= minConfidence)
+                {
+                    boolean ignoreAuthority = new DSpace()
+                            .getConfigurationService()
+                            .getPropertyAsType(
+                                    "discovery.index.authority.ignore." + field,
+                                    new DSpace()
+                                            .getConfigurationService()
+                                            .getPropertyAsType(
+                                                    "discovery.index.authority.ignore",
+                                                    new Boolean(false)), true);
+                    if (!ignoreAuthority)
+                    {
+                        authority = meta.authority;
+
+                        boolean ignorePrefered = new DSpace()
+                                .getConfigurationService()
+                                .getPropertyAsType(
+                                        "discovery.index.authority.ignore-prefered."
+                                                + field,
+                                        new DSpace()
+                                                .getConfigurationService()
+                                                .getPropertyAsType(
+                                                        "discovery.index.authority.ignore-prefered",
+                                                        new Boolean(false)),
+                                        true);
+                        if (!ignorePrefered)
+                        {
+
+                            preferedLabel = ChoiceAuthorityManager.getManager()
+                                    .getLabel(meta.schema, meta.element,
+                                            meta.qualifier, meta.authority,
+                                            meta.language);
+                        }
+
+                        boolean ignoreVariants = new DSpace()
+                                .getConfigurationService()
+                                .getPropertyAsType(
+                                        "discovery.index.authority.ignore-variants."
+                                                + field,
+                                        new DSpace()
+                                                .getConfigurationService()
+                                                .getPropertyAsType(
+                                                        "discovery.index.authority.ignore-variants",
+                                                        new Boolean(false)),
+                                        true);
+                        if (!ignoreVariants)
+                        {
+                            variants = ChoiceAuthorityManager.getManager()
+                                    .getVariants(meta.schema, meta.element,
+                                            meta.qualifier, meta.authority,
+                                            meta.language);
+                        }
+
+                    }
                 }
 
                 if ((searchFilters.get(field) != null || searchFilters.get(unqualifiedField + "." + Item.ANY) != null))
@@ -841,6 +956,11 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     for (DiscoverySearchFilter searchFilter : searchFilterConfigs)
                     {
                         Date date = null;
+                        String separator = new DSpace().getConfigurationService().getProperty("discovery.solr.facets.split.char");
+                        if(separator == null)
+                        {
+                            separator = FILTER_SEPARATOR;
+                        }
                         if(searchFilter.getType().equals(DiscoveryConfigurationParameters.TYPE_DATE))
                         {
                             //For our search filters that are dates we format them properly
@@ -851,37 +971,99 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                                 value = DateFormatUtils.formatUTC(date, "yyyy-MM-dd");
                             }
                         }
-
                         doc.addField(searchFilter.getIndexFieldName(), value);
                         doc.addField(searchFilter.getIndexFieldName() + "_keyword", value);
+                        
+                        if (authority != null && preferedLabel == null)
+                        {
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_keyword", value + AUTHORITY_SEPARATOR
+                                    + authority);
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_authority", authority);
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_acid", value.toLowerCase()
+                                    + separator + value
+                                    + AUTHORITY_SEPARATOR + authority);
+                        }
+
+                        if (preferedLabel != null)
+                        {
+                            doc.addField(searchFilter.getIndexFieldName(),
+                                    preferedLabel);
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_keyword", preferedLabel);
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_keyword", preferedLabel
+                                    + AUTHORITY_SEPARATOR + authority);
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_authority", authority);
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_acid", preferedLabel.toLowerCase()
+                                    + separator + preferedLabel
+                                    + AUTHORITY_SEPARATOR + authority);
+                        }
+                        if (variants != null)
+                        {
+                            for (String var : variants)
+                            {
+                                doc.addField(searchFilter.getIndexFieldName() + "_keyword", var);
+                                doc.addField(searchFilter.getIndexFieldName()
+                                        + "_acid", var.toLowerCase()
+                                        + separator + var
+                                        + AUTHORITY_SEPARATOR + authority);
+                            }
+                        }
+                        
+                        //Add a dynamic fields for auto complete in search
+                        doc.addField(searchFilter.getIndexFieldName() + "_ac",
+                                value.toLowerCase() + separator + value);
+                        if (preferedLabel != null)
+                        {
+                            doc.addField(searchFilter.getIndexFieldName()
+                                    + "_ac", preferedLabel.toLowerCase()
+                                    + separator + preferedLabel);
+                        }
+                        if (variants != null)
+                        {
+                            for (String var : variants)
+                            {
+                                doc.addField(searchFilter.getIndexFieldName()
+                                        + "_ac", var.toLowerCase() + separator
+                                        + var);
+                            }
+                        }                        
 
                         if(searchFilter.getFilterType().equals(DiscoverySearchFilterFacet.FILTER_TYPE_FACET))
                         {
                             if(searchFilter.getType().equals(DiscoveryConfigurationParameters.TYPE_TEXT))
                             {
-                                //Add a special filter
-                                //We use a separator to split up the lowercase and regular case, this is needed to get our filters in regular case
-                                //Solr has issues with facet prefix and cases
-                                String separator = new DSpace().getConfigurationService().getProperty("discovery.solr.facets.split.char");
-                                if(separator == null)
-                                {
-                                    separator = FILTER_SEPARATOR;
-                                }
-                                doc.addField(searchFilter.getIndexFieldName() + "_filter", value.toLowerCase() + separator + value);
+                            	//Add a special filter
+                           	 	//We use a separator to split up the lowercase and regular case, this is needed to get our filters in regular case
+                            	//Solr has issues with facet prefix and cases
+                            	if (authority != null)
+                            	{
+                                	String facetValue = preferedLabel != null?preferedLabel:value;
+                                	doc.addField(searchFilter.getIndexFieldName() + "_filter", facetValue.toLowerCase() + separator + facetValue + AUTHORITY_SEPARATOR + authority);
+                            	}
+                            	else
+                            	{
+                                	doc.addField(searchFilter.getIndexFieldName() + "_filter", value.toLowerCase() + separator + value);
+                            	}
                             }else
-                            if(searchFilter.getType().equals(DiscoveryConfigurationParameters.TYPE_DATE))
-                            {
-                                if(date != null)
+                                if(searchFilter.getType().equals(DiscoveryConfigurationParameters.TYPE_DATE))
                                 {
-                                    String indexField = searchFilter.getIndexFieldName() + ".year";
-                                    doc.addField(searchFilter.getIndexFieldName() + "_keyword", DateFormatUtils.formatUTC(date, "yyyy"));
-                                    doc.addField(indexField, DateFormatUtils.formatUTC(date, "yyyy"));
-                                    //Also save a sort value of this year, this is required for determining the upper & lower bound year of our facet
-                                    if(doc.getField(indexField + "_sort") == null)
+                                    if(date != null)
                                     {
-                                        //We can only add one year so take the first one
-                                        doc.addField(indexField + "_sort", DateFormatUtils.formatUTC(date, "yyyy"));
-                                    }
+                                        String indexField = searchFilter.getIndexFieldName() + ".year";
+                                        doc.addField(searchFilter.getIndexFieldName() + "_keyword", DateFormatUtils.formatUTC(date, "yyyy"));
+                                    	doc.addField(indexField, DateFormatUtils.formatUTC(date, "yyyy"));
+                                    	//Also save a sort value of this year, this is required for determining the upper & lower bound year of our facet
+                                        if(doc.getField(indexField + "_sort") == null)
+                                        {
+                                        	//We can only add one year so take the first one
+                                        	doc.addField(indexField + "_sort", DateFormatUtils.formatUTC(date, "yyyy"));
+                                    	}
                                 }
                             }else
                             if(searchFilter.getType().equals(DiscoveryConfigurationParameters.TYPE_HIERARCHICAL))
@@ -903,12 +1085,6 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                                         {
                                             valueBuilder.append(hierarchicalSidebarFacetConfiguration.getSplitter());
                                         }
-                                    }
-
-                                    String separator = new DSpace().getConfigurationService().getProperty("discovery.solr.facets.split.char");
-                                    if(separator == null)
-                                    {
-                                        separator = FILTER_SEPARATOR;
                                     }
 
                                     String indexValue = valueBuilder.toString().trim();
@@ -961,8 +1137,30 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     doc.addField(field + "_mlt", value);
                 }
 
-                doc.addField(field, value.toLowerCase());
-
+                doc.addField(field, value);
+                if (toProjectionFields.contains(field) || toProjectionFields.contains(unqualifiedField + "." + Item.ANY))
+                {
+                    StringBuffer variantsToStore = new StringBuffer();
+                    if (variants != null)
+                    {
+                        for (String var : variants)
+                        {
+                            variantsToStore.append(VARIANTS_STORE_SEPARATOR);
+                            variantsToStore.append(var);
+                        }
+                    }   
+                    doc.addField(
+                            field + "_stored",
+                            value + STORE_SEPARATOR + preferedLabel
+                                    + STORE_SEPARATOR
+                                    + (variantsToStore.length() > VARIANTS_STORE_SEPARATOR
+                                            .length() ? variantsToStore
+                                            .substring(VARIANTS_STORE_SEPARATOR
+                                                    .length()) : "null")
+                                    + STORE_SEPARATOR + authority
+                                    + STORE_SEPARATOR + meta.language);
+                }
+                
                 if (meta.language != null && !meta.language.trim().equals(""))
                 {
                     String langField = field + "." + meta.language;
@@ -1057,6 +1255,16 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         {
             log.error(e.getMessage(), e);
         }
+        finally {
+            Iterator<InputStreamReader> itr = readers.iterator();
+            while (itr.hasNext()) {
+                InputStreamReader reader = itr.next();
+                if (reader != null) {
+                    reader.close();
+                }
+            }
+            log.debug("closed " + readers.size() + " readers");
+        }
 
         //Do any additional indexing, depends on the plugins
         List<SolrServiceIndexPlugin> solrServiceIndexPlugins = new DSpace().getServiceManager().getServicesByType(SolrServiceIndexPlugin.class);
@@ -1072,18 +1280,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         } catch (RuntimeException e)
         {
             log.error("Error while writing item to discovery index: " + handle + " message:"+ e.getMessage(), e);
-        } finally {
-            Iterator<InputStreamReader> itr = readers.iterator();
-            while (itr.hasNext())
-            {
-                InputStreamReader reader = itr.next();
-                if (reader != null)
-                {
-                    reader.close();
-                }
-            }
-            log.debug("closed " + readers.size() + " readers");
-        }
+        } 
     }
 
     /**
@@ -1105,6 +1302,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
 
         // New fields to weaken the dependence on handles, and allow for faster
         // list display
+		doc.addField("search.uniqueid", type+"-"+id);
         doc.addField("search.resourcetype", Integer.toString(type));
 
         doc.addField("search.resourceid", Integer.toString(id));
@@ -1212,7 +1410,21 @@ public class SolrServiceImpl implements SearchService, IndexingService {
     }
 
     //******** SearchService implementation
-    public DiscoverResult search(Context context, DSpaceObject dso, DiscoverQuery discoveryQuery) throws SearchServiceException {
+    @Override
+    public DiscoverResult search(Context context, DiscoverQuery query) throws SearchServiceException
+    {
+        return search(context, query, false);
+    }
+
+    @Override
+    public DiscoverResult search(Context context, DSpaceObject dso,
+            DiscoverQuery query)
+            throws SearchServiceException
+    {
+        return search(context, dso, query, false);
+    }
+    
+    public DiscoverResult search(Context context, DSpaceObject dso, DiscoverQuery discoveryQuery, boolean includeWithdrawn) throws SearchServiceException {
         if(dso != null)
         {
             if (dso instanceof Community)
@@ -1226,14 +1438,14 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                 discoveryQuery.addFilterQueries("handle:" + dso.getHandle());
             }
         }
-        return search(context, discoveryQuery);
+        return search(context, discoveryQuery, includeWithdrawn);
 
     }
 
 
-    public DiscoverResult search(Context context, DiscoverQuery discoveryQuery) throws SearchServiceException {
+    public DiscoverResult search(Context context, DiscoverQuery discoveryQuery, boolean includeWithdrawn) throws SearchServiceException {
         try {
-            SolrQuery solrQuery = resolveToSolrQuery(context, discoveryQuery);
+            SolrQuery solrQuery = resolveToSolrQuery(context, discoveryQuery, includeWithdrawn);
 
 
             QueryResponse queryResponse = getSolr().query(solrQuery);
@@ -1245,17 +1457,22 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         }
     }
 
-    protected SolrQuery resolveToSolrQuery(Context context, DiscoverQuery discoveryQuery)
+    protected SolrQuery resolveToSolrQuery(Context context, DiscoverQuery discoveryQuery, boolean includeWithdrawn)
     {
         SolrQuery solrQuery = new SolrQuery();
 
         String query = "*:*";
         if(discoveryQuery.getQuery() != null)
         {
-            query = discoveryQuery.getQuery();
-        }
+        	query = discoveryQuery.getQuery();
+		}
 
         solrQuery.setQuery(query);
+            
+        if (!includeWithdrawn)
+        {
+        	solrQuery.addFilterQuery("NOT(withdrawn:true)");
+		}
 
         for (int i = 0; i < discoveryQuery.getFilterQueries().size(); i++)
         {
@@ -1317,7 +1534,12 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     facetSort = FacetParams.FACET_SORT_INDEX;
                 }
                 solrQuery.add("f." + field + "." + FacetParams.FACET_SORT, facetSort);
-
+                if (facetFieldConfig.getOffset() != -1)
+                {
+                    solrQuery.setParam("f." + field + "."
+                            + FacetParams.FACET_OFFSET,
+                            String.valueOf(facetFieldConfig.getOffset()));
+                }
                 if(facetFieldConfig.getPrefix() != null)
                 {
                     solrQuery.setFacetPrefix(field, facetFieldConfig.getPrefix());
@@ -1380,7 +1602,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
 
 
     public InputStream searchJSON(Context context, DiscoverQuery discoveryQuery, String jsonIdentifier) throws SearchServiceException {
-        SolrQuery solrQuery = resolveToSolrQuery(context, discoveryQuery);
+        SolrQuery solrQuery = resolveToSolrQuery(context, discoveryQuery, false);
         //We use json as out output type
         solrQuery.setParam("json.nl", "map");
         solrQuery.setParam("json.wrf", jsonIdentifier);
@@ -1401,7 +1623,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         }
         return null;
     }
-
+    
     protected DiscoverResult retrieveResult(Context context, DiscoverQuery query, QueryResponse solrQueryResponse) throws SQLException {
         DiscoverResult result = new DiscoverResult();
 
@@ -1476,8 +1698,18 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                         {
                             String displayedValue = transformDisplayedValue(context, facetField.getName(), facetValue.getName());
                             String field = transformFacetField(facetFieldConfig, facetField.getName(), true);
-
-                            result.addFacetResult(field, new DiscoverResult.FacetResult(displayedValue, displayedValue, facetValue.getCount()));
+                            String authorityValue = transformAuthorityValue(context, facetField.getName(), facetValue.getName());
+                            String sortValue = transformSortValue(context, facetField.getName(), facetValue.getName());
+                            String filterValue = displayedValue;
+                            if (StringUtils.isNotBlank(authorityValue))
+                            {
+                                filterValue = authorityValue;
+                            }
+                            result.addFacetResult(
+                                    field,
+                                    new DiscoverResult.FacetResult(filterValue,
+                                            displayedValue, authorityValue,
+                                            sortValue, facetValue.getCount()));
                         }
                     }
                 }
@@ -1498,13 +1730,13 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                     name = name.substring(0, name.lastIndexOf(']')).replaceAll("TO", "-");
                     String filter = facetQuery.substring(facetQuery.indexOf('['));
                     filter = filter.substring(0, filter.lastIndexOf(']') + 1);
-
+                    
                     Integer count = sortedFacetQueries.get(facetQuery);
 
                     //No need to show empty years
                     if(0 < count)
                     {
-                        result.addFacetResult(facetField, new DiscoverResult.FacetResult(filter, name, count));
+                        result.addFacetResult(facetField, new DiscoverResult.FacetResult(filter, name, null, name, count));
                     }
                 }
             }
@@ -1597,7 +1829,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
             return new ArrayList<DSpaceObject>(0);
 		}
     }
-
+    
     public DiscoverFilterQuery toFilterQuery(Context context, String field, String operator, String value) throws SQLException{
         DiscoverFilterQuery result = new DiscoverFilterQuery();
 
@@ -1610,6 +1842,17 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                 //Query the keyword indexed field !
                 filterQuery.append("_keyword");
             }
+            else if ("authority".equals(operator))
+            {
+                //Query the authority indexed field !
+                filterQuery.append("_authority");
+            }
+            else if ("notequals".equals(operator)
+                    || "notcontains".equals(operator)
+                    || "notauthority".equals(operator))
+            {
+                filterQuery.insert(0, "-");
+            }
             filterQuery.append(":");
             if("equals".equals(operator))
             {
@@ -1620,7 +1863,8 @@ public class SolrServiceImpl implements SearchService, IndexingService {
 
                 }
                 filterQuery.append(value);
-            }else{
+            }
+            else{
                 //DO NOT ESCAPE RANGE QUERIES !
                 if(!value.matches("\\[.*TO.*\\]"))
                 {
@@ -1689,7 +1933,7 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         }
         return results;
     }
-
+    
     @Override
     public String toSortFieldIndex(String metadataField, String type)
     {
@@ -1736,7 +1980,17 @@ public class SolrServiceImpl implements SearchService, IndexingService {
                 //Only display top level filters !
                 return field + "_tax_0_filter";
             }
-
+        }else if(facetFieldConfig.getType().equals(DiscoveryConfigurationParameters.TYPE_AUTHORITY))
+        {
+            if(removePostfix)
+            {
+                return field.substring(0, field.lastIndexOf("_acid"));
+            }else{
+                return field + "_acid";
+            }
+        }else if(facetFieldConfig.getType().equals(DiscoveryConfigurationParameters.TYPE_STANDARD))
+        {
+            return field;
         }else{
             return field;
         }
@@ -1746,8 +2000,9 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         if(field.equals("location.comm") || field.equals("location.coll"))
         {
             value = locationToName(context, field, value);
-        }else
-        if(field.endsWith("_filter"))
+        }
+        else if (field.endsWith("_filter") || field.endsWith("_ac")
+          || field.endsWith("_acid"))
         {
             //We have a filter make sure we split !
             String separator = new DSpace().getConfigurationService().getProperty("discovery.solr.facets.split.char");
@@ -1762,6 +2017,70 @@ public class SolrServiceImpl implements SearchService, IndexingService {
             int start = fqParts.length / 2;
             for(int i = start; i < fqParts.length; i++)
             {
+                String[] split = fqParts[i].split(AUTHORITY_SEPARATOR, 2);
+                valueBuffer.append(split[0]);
+            }
+            value = valueBuffer.toString();
+        }else if(value.matches("\\((.*?)\\)"))
+        {
+            //The brackets where added for better solr results, remove the first & last one
+            value = value.substring(1, value.length() -1);
+        }
+        return value;
+    }
+    
+    protected String transformAuthorityValue(Context context, String field, String value) throws SQLException {
+        if (field.endsWith("_filter") || field.endsWith("_ac")
+                || field.endsWith("_acid"))
+        {
+            //We have a filter make sure we split !
+            String separator = new DSpace().getConfigurationService().getProperty("discovery.solr.facets.split.char");
+            if(separator == null)
+            {
+                separator = FILTER_SEPARATOR;
+            }
+            //Escape any regex chars
+            separator = java.util.regex.Pattern.quote(separator);
+            String[] fqParts = value.split(separator);
+            StringBuffer authorityBuffer = new StringBuffer();
+            int start = fqParts.length / 2;
+            for(int i = start; i < fqParts.length; i++)
+            {
+                String[] split = fqParts[i].split(AUTHORITY_SEPARATOR, 2);
+                if (split.length == 2)
+                {
+                    authorityBuffer.append(split[1]);
+                }
+            }
+            if (authorityBuffer.length() > 0)
+            {
+                return authorityBuffer.toString();
+            }
+        }
+        return null;
+    }
+    
+    protected String transformSortValue(Context context, String field, String value) throws SQLException {
+        if(field.equals("location.comm") || field.equals("location.coll"))
+        {
+            value = locationToName(context, field, value);
+        }
+        else if (field.endsWith("_filter") || field.endsWith("_ac")
+                || field.endsWith("_acid"))
+        {
+            //We have a filter make sure we split !
+            String separator = new DSpace().getConfigurationService().getProperty("discovery.solr.facets.split.char");
+            if(separator == null)
+            {
+                separator = FILTER_SEPARATOR;
+            }
+            //Escape any regex chars
+            separator = java.util.regex.Pattern.quote(separator);
+            String[] fqParts = value.split(separator);
+            StringBuffer valueBuffer = new StringBuffer();
+            int end = fqParts.length / 2;
+            for(int i = 0; i < end; i++)
+            {
                 valueBuffer.append(fqParts[i]);
             }
             value = valueBuffer.toString();
@@ -1772,4 +2091,23 @@ public class SolrServiceImpl implements SearchService, IndexingService {
         }
         return value;
     }
+
+	@Override
+	public void indexContent(Context context, DSpaceObject dso, boolean force,
+			boolean commit) throws SearchServiceException, SQLException {
+		indexContent(context, dso, force);
+		if (commit)
+		{
+			commit();
+		}
+	}
+
+	@Override
+	public void commit() throws SearchServiceException {
+		try {
+			getSolr().commit();
+		} catch (Exception e) {
+			throw new SearchServiceException(e.getMessage(), e);
+		}
+	}
 }
