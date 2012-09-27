@@ -21,3 +21,11 @@ nbdist/
 nbactions.xml
 nb-configuration.xml
 META-INF/
+
+## Ignore overlays
+*/overlays/
+dspace/modules/*/overlays/
+
+## Ignore mac files
+*.DS_Store
+
