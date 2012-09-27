@@ -8,7 +8,6 @@
 package org.dspace.ctask.general;
 
 import org.apache.log4j.Logger;
-import org.dspace.authorize.AuthorizeException;
 import org.dspace.content.Bitstream;
 import org.dspace.content.Bundle;
 import org.dspace.content.DSpaceObject;
@@ -18,13 +17,13 @@ import org.dspace.curate.Curator;
 
 import java.io.IOException;
 import java.sql.SQLException;
-import java.util.List;
+
 
 /**
  * A curation job to identify items without any bitstreams attached to them.
  *
  * @author Bram Luyten (bram@mire.be)
- */
+ */                                                                                                                                                                           em
 public class MetadataOnlyItems extends AbstractCurationTask
 {
 
@@ -75,9 +74,8 @@ public class MetadataOnlyItems extends AbstractCurationTask
                         }
                     }
 
-                    if (true) {
-                        status = Curator.CURATE_SUCCESS;
-                    }
+                status = Curator.CURATE_SUCCESS;
+
                 }
             }  catch (SQLException sqle) {
                 // Something went wrong
