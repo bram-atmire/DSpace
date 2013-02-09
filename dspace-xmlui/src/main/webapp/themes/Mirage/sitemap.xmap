@@ -130,6 +130,7 @@
                     <map:parameter name="stylesheet.screen#4" value="lib/css/jquery-ui-1.8.15.custom.css"/>
                     <map:parameter name="stylesheet.screen#5" value="lib/css/style.css"/>
                     <map:parameter name="stylesheet.screen#6" value="lib/css/authority-control.css"/>
+                    <map:parameter name="stylesheet.screen#7" value="lib/css/cookiecuttr.css"/>
                 </map:transform>
 
                 <map:transform type="IncludePageMeta">
@@ -140,6 +141,8 @@
                 <map:transform type="IncludePageMeta">
                     <map:parameter name="stylesheet.all" value="lib/css/media.css"/>
                     <map:parameter name="javascript" value="lib/js/jquery-ui-1.8.15.custom.min.js"/>
+                    <map:parameter name="javascript.cookie" value="lib/js/jquery-cookie.js"/>
+                    <map:parameter name="javascript.cookiecuttr" value="lib/js/jquery-cookiecuttr.js"/>
                     <map:parameter name="theme.path" value="{global:theme-path}"/>
                     <map:parameter name="theme.name" value="{global:theme-name}"/>
                 </map:transform>

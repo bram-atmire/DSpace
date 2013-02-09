@@ -639,7 +639,7 @@
 
 
 
-        <!-- Add theme javascipt  -->
+        <!-- Add theme javascript  -->
         <xsl:for-each select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='javascript'][@qualifier='url']">
             <script type="text/javascript">
                 <xsl:attribute name="src">
@@ -705,6 +705,14 @@
         </script>
         <xsl:text disable-output-escaping="yes" >&lt;![endif]--&gt;</xsl:text>
 
+        <!--CookieCuttr Script to Comply with EU Cookie Laws-->
+        <script type="text/javascript">
+            runAfterJSImports.add(function() {
+            $(document).ready(function () {
+        $.cookieCuttr();
+        });
+            });
+        </script>
 
         <script type="text/javascript">
             runAfterJSImports.execute();
@@ -712,7 +720,9 @@
 
         <!-- Add a google analytics script if the key is present -->
         <xsl:if test="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='google'][@qualifier='analytics']">
-            <script type="text/javascript"><xsl:text>
+            <script type="text/javascript">
+                if (jQuery.cookie('cc_cookie_accept') == "cc_cookie_accept") {
+                <xsl:text>
                    var _gaq = _gaq || [];
                    _gaq.push(['_setAccount', '</xsl:text><xsl:value-of select="/dri:document/dri:meta/dri:pageMeta/dri:metadata[@element='google'][@qualifier='analytics']"/><xsl:text>']);
                    _gaq.push(['_trackPageview']);
@@ -722,7 +732,9 @@
                        ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
                        var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
                    })();
-           </xsl:text></script>
+           </xsl:text>
+                }
+            </script>
         </xsl:if>
     </xsl:template>
 
