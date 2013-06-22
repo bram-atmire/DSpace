@@ -25,3 +25,9 @@ META-INF/
 ## Ignore all *.properties file in root folder, EXCEPT build.properties (the default)
 /*.properties
 !/build.properties
+
+## Ignore overlays
+dspace-swordv2/overlays/
+dspace/modules/solr/overlays/
+dspace/modules/swordv2/overlays/
+dspace/modules/xmlui/overlays/
