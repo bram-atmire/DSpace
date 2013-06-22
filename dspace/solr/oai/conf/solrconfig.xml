@@ -32,17 +32,19 @@
      -->
   <abortOnConfigurationError>${solr.abortOnConfigurationError:true}</abortOnConfigurationError>
 
-  <!-- lib directives can be used to instruct Solr to load an Jars identified
-       and use them to resolve any "plugins" specified in your solrconfig.xml or
-       schema.xml (ie: Analyzers, Request Handlers, etc...).
+  <luceneMatchVersion>LUCENE_35</luceneMatchVersion>
 
-       All directories and paths are resolved relative the instanceDir.
+    <!-- lib directives can be used to instruct Solr to load an Jars identified
+         and use them to resolve any "plugins" specified in your solrconfig.xml or
+         schema.xml (ie: Analyzers, Request Handlers, etc...).
 
-       If a "./lib" directory exists in your instanceDir, all files found in it
-       are included as if you had used the following syntax...
+         All directories and paths are resolved relative the instanceDir.
 
-              <lib dir="./lib" />
-    -->
+         If a "./lib" directory exists in your instanceDir, all files found in it
+         are included as if you had used the following syntax...
+
+                <lib dir="./lib" />
+      -->
   <!-- A dir option by itself adds any files found in the directory to the
        classpath, this is useful for including all jars in a directory.
     -->
