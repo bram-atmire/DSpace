@@ -121,41 +121,25 @@
 
     <command>
         <name>index</name>
-        <description>General index command (requires extra parameters)</description>
+        <description>Creates, cleans and updates DSpace search and browse indexes</description>
         <step>
-            <class>org.dspace.browse.IndexBrowse</class>
+            <class>org.dspace.discovery.IndexClient</class>
         </step>
     </command>
     
     <command>
         <name>index-init</name>
-        <description>Initialise the search and browse indexes</description>
-        <step passuserargs="false">
-            <class>org.dspace.browse.IndexBrowse</class>
-            <argument>-f</argument>
-            <argument>-r</argument>
-        </step>
-        <step passuserargs="false">
-            <class>org.dspace.browse.ItemCounter</class>
-        </step>
-        <step passuserargs="false">
-            <class>org.dspace.search.DSIndexer</class>
-            <argument>-b</argument>
+        <description>Creates, cleans and updates DSpace search and browse indexes. Deprecated, use index instead</description>
+        <step>
+            <class>org.dspace.discovery.IndexClient</class>
         </step>
     </command>
 
     <command>
         <name>index-update</name>
-        <description>Update the search and browse indexes</description>
-        <step passuserargs="false">
-            <class>org.dspace.browse.IndexBrowse</class>
-            <argument>-i</argument>
-        </step>
-        <step passuserargs="false">
-            <class>org.dspace.browse.ItemCounter</class>
-        </step>
-        <step passuserargs="false">
-            <class>org.dspace.search.DSIndexer</class>
+        <description>Creates, cleans and updates DSpace search and browse indexes. Deprecated, use index instead</description>
+        <step>
+            <class>org.dspace.discovery.IndexClient</class>
         </step>
      </command>
 
@@ -381,7 +365,7 @@
 
     <command>
         <name>update-discovery-index</name>
-        <description>Update Discovery Solr Search Index</description>
+        <description>Creates, cleans and updates DSpace search and browse indexes. Deprecated, use index instead</description>
         <step>
             <class>org.dspace.discovery.IndexClient</class>
         </step>
