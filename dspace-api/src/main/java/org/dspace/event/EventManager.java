@@ -14,10 +14,12 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-import org.apache.commons.pool.KeyedObjectPool;
-import org.apache.commons.pool.KeyedPoolableObjectFactory;
-import org.apache.commons.pool.PoolUtils;
-import org.apache.commons.pool.impl.GenericKeyedObjectPool;
+import org.apache.commons.pool2.BaseKeyedPooledObjectFactory;
+import org.apache.commons.pool2.KeyedObjectPool;
+import org.apache.commons.pool2.KeyedPooledObjectFactory;
+import org.apache.commons.pool2.PoolUtils;
+import org.apache.commons.pool2.impl.GenericKeyedObjectPool;
+import org.apache.commons.pool2.impl.GenericKeyedObjectPoolConfig;
 import org.apache.log4j.Logger;
 import org.dspace.core.ConfigurationManager;
 import org.dspace.core.Context;
@@ -38,9 +40,9 @@ public class EventManager
     // overridden
     public static final String DEFAULT_DISPATCHER = "default";
 
-    private static DispatcherPoolFactory dispatcherFactory = null;
+    private static KeyedPooledObjectFactory dispatcherFactory = null;
 
-    private static GenericKeyedObjectPool.Config poolConfig = null;
+    private static GenericKeyedObjectPoolConfig poolConfig = null;
 
     // Keyed FIFO Pool of event dispatchers
     private static KeyedObjectPool dispatcherPool = null;
@@ -67,17 +69,21 @@ public class EventManager
 
             // TODO EVENT Eviction parameters should be set
 
-            poolConfig = new GenericKeyedObjectPool.Config();
-            poolConfig.maxActive = 100;
-            poolConfig.maxIdle = 5;
-            poolConfig.maxTotal = 100;
+            poolConfig = new GenericKeyedObjectPoolConfig();
+
+            //poolConfig.maxActive = 100;
+            //Not sure whether the new setMaxTotalPerKey is the same as the old maxActive
+            poolConfig.setMaxTotalPerKey(100);
+
+            //poolConfig.maxIdle = 5;
+            //Not sure whether the old maxIdle is the same as Set MaxIdlePerKey !!!!
+            poolConfig.setMaxIdlePerKey(5);
+            poolConfig.setMaxTotal(100);
 
             try
             {
-                dispatcherFactory = new DispatcherPoolFactory();
-                dispatcherPool = PoolUtils
-                        .synchronizedPool(new GenericKeyedObjectPool(
-                                dispatcherFactory, poolConfig));
+                dispatcherFactory = new BaseKeyedPooledObjectFactory();
+                dispatcherPool = PoolUtils.synchronizedPool(new GenericKeyedObjectPool<Object, Object>(dispatcherFactory, poolConfig));
 
                 enumerateConsumers();
 
