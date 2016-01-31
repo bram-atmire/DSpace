@@ -27,6 +27,11 @@
             <name>MireDot Releases</name>
             <url>http://nexus.qmino.com/content/repositories/miredot</url>
         </pluginRepository>
+        <pluginRepository>
+            <id>miredot snapshots</id>
+            <name>MireDot Snapshots</name>
+            <url>http://nexus.qmino.com/content/repositories/miredot-snapshots</url>
+        </pluginRepository>
     </pluginRepositories>
 
     <build>
@@ -44,7 +49,8 @@
             <plugin>
                 <groupId>com.qmino</groupId>
                 <artifactId>miredot-plugin</artifactId>
-                <version>1.6.2</version>
+                <!--1.6.3 is the latest stable one-->
+                <version>2.0-SNAPSHOT</version>
                 <executions>
                     <execution>
                         <goals>
@@ -54,7 +60,7 @@
                 </executions>
                 <configuration>
                     <license>
-                        UHJvamVjdHxvcmcuZHNwYWNlLmRzcGFjZS1yZXN0fDIwMTYtMTItMTZ8dHJ1ZSNNQ3dDRkZaOWpOdktXTXAvenF3czBOc2NtS2RtM1Z3bkFoUkFkeEFpdXJSL0F5NnRaK3o3VFFaQWhkWk5sdz09
+                        cHJvamVjdHxvcmcuZHNwYWNlLmRzcGFjZS1yZXN0fDIwMTctMTItMTd8dHJ1ZXwtMSNNQ3dDRkhhQ2I1Z0NudnNxQWE1TjdzM21ZZWtOMkN0QkFoUU9VNzdOY0ZzVXBSOWtyTlovNFdGanVGaXFoZz09
                     </license>
                     <!-- apply for spring mvc support
                     <restModel>
