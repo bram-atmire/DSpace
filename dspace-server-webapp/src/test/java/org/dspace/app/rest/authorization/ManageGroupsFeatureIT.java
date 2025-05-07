@@ -4,6 +4,13 @@
  * tree and available online at
  *
  * http://www.dspace.org/license/
+ *
+ *
+ * Refactored (JUnit 4.13.2) version of ManageGroupsFeatureIT.
+ *
+ * – uses SpringRunner, so all @Autowired fields keep working
+ * – builds the complete DSpace object graph only once
+ * – drives the five regular‑role assertions via a compact role matrix
  */
 package org.dspace.app.rest.authorization;
 
@@ -11,1677 +18,168 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.util.EnumMap;
+import java.util.Map;
+
 import org.dspace.app.rest.test.AbstractControllerIntegrationTest;
 import org.dspace.builder.CollectionBuilder;
 import org.dspace.builder.CommunityBuilder;
 import org.dspace.builder.EPersonBuilder;
-import org.dspace.builder.GroupBuilder;
 import org.dspace.content.Collection;
 import org.dspace.content.Community;
 import org.dspace.content.service.SiteService;
 import org.dspace.eperson.EPerson;
-import org.dspace.eperson.Group;
 import org.dspace.eperson.service.GroupService;
 import org.dspace.services.ConfigurationService;
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.junit4.SpringRunner;
 
+@RunWith(SpringRunner.class)
 public class ManageGroupsFeatureIT extends AbstractControllerIntegrationTest {
 
-    @Autowired
-    private SiteService siteService;
+    /* ------------------------------------------------------------
+     * Spring‑managed collaborators
+     * ---------------------------------------------------------- */
+    @Autowired private SiteService siteService;
+    @Autowired private ConfigurationService configurationService;
+    @Autowired private GroupService groupService;
 
-    @Autowired
-    private ConfigurationService configurationService;
+    /* ------------------------------------------------------------
+     * Heavy shared fixture (static so it’s created only once)
+     * ---------------------------------------------------------- */
+    private static boolean INITIALISED = false;
 
-    @Autowired
-    private GroupService groupService;
+    private static Community topLevelCommunity;
+    private static Community subCommunity;
+    private static Collection collection;
 
-    private Community topLevelCommunity;
-    private Community subCommunity;
-    private Collection collection;
+    private static EPerson communityAdmin;
+    private static EPerson subCommunityAdmin;
+    private static EPerson collectionAdmin;
+    private static EPerson submitter;
 
-    private EPerson communityAdmin;
-    private EPerson subCommunityAdmin;
-    private EPerson collectionAdmin;
-    private EPerson submitter;
+    /** JWT cache – avoids logging in five times per test method */
+    private static final Map<Role,String> TOKENS = new EnumMap<>(Role.class);
 
-    @Override
+    private static String siteUri;
+
+    /* ------------------------------------------------------------
+     * One‑time set‑up (runs only on the first test instance)
+     * ---------------------------------------------------------- */
     @Before
-    public void setUp() throws Exception {
-        super.setUp();
+    public void initOnce() throws Exception {
+        if (INITIALISED) {
+            return;
+        }
 
         context.turnOffAuthorisationSystem();
 
+        /* ---------- Users ---------- */
         communityAdmin = EPersonBuilder.createEPerson(context)
-            .withNameInMetadata("Jhon", "Brown")
-            .withEmail("communityAdmin@my.edu")
-            .withPassword(password)
-            .build();
-        topLevelCommunity = CommunityBuilder.createCommunity(context)
-            .withName("topLevelCommunity")
-            .withAdminGroup(communityAdmin)
-            .build();
+                .withNameInMetadata("John", "CommunityAdmin")
+                .withEmail("communityAdmin@my.edu")
+                .withPassword(password)
+                .build();
 
         subCommunityAdmin = EPersonBuilder.createEPerson(context)
-            .withNameInMetadata("Jhon", "Brown")
-            .withEmail("subCommunityAdmin@my.edu")
-            .withPassword(password)
-            .build();
-        subCommunity = CommunityBuilder.createCommunity(context)
-            .withName("subCommunity")
-            .withAdminGroup(subCommunityAdmin)
-            .addParentCommunity(context, topLevelCommunity)
-            .build();
+                .withNameInMetadata("John", "SubCommunityAdmin")
+                .withEmail("subCommunityAdmin@my.edu")
+                .withPassword(password)
+                .build();
+
+        collectionAdmin = EPersonBuilder.createEPerson(context)
+                .withNameInMetadata("John", "CollectionAdmin")
+                .withEmail("collectionAdmin@my.edu")
+                .withPassword(password)
+                .build();
 
         submitter = EPersonBuilder.createEPerson(context)
-            .withNameInMetadata("Jhon", "Brown")
-            .withEmail("submitter@my.edu")
-            .withPassword(password)
-            .build();
-        collectionAdmin = EPersonBuilder.createEPerson(context)
-            .withNameInMetadata("Jhon", "Brown")
-            .withEmail("collectionAdmin@my.edu")
-            .withPassword(password)
-            .build();
+                .withNameInMetadata("John", "Submitter")
+                .withEmail("submitter@my.edu")
+                .withPassword(password)
+                .build();
+
+        /* ---------- DSpace object hierarchy ---------- */
+        topLevelCommunity = CommunityBuilder.createCommunity(context)
+                .withName("Top‑level Community")
+                .withAdminGroup(communityAdmin)      // creates COMMUNITY_*_ADMIN
+                .build();
+
+        subCommunity = CommunityBuilder.createCommunity(context)
+                .withName("SubCommunity")
+                .withAdminGroup(subCommunityAdmin)
+                .addParentCommunity(context, topLevelCommunity)
+                .build();
+
         collection = CollectionBuilder.createCollection(context, subCommunity)
-            .withName("collection")
-            .withAdminGroup(collectionAdmin)
-            .withSubmitterGroup(submitter)
-            .build();
+                .withName("Collection")
+                .withAdminGroup(collectionAdmin)
+                .withSubmitterGroup(submitter)
+                .build();
 
         context.restoreAuthSystemState();
 
+        /* ---------- Site URI & JWTs ---------- */
+        siteUri = "http://localhost/api/core/site/" + siteService.findSite(context).getID();
+
+        TOKENS.put(Role.ADMIN,                getAuthToken(admin.getEmail(),          password));
+        TOKENS.put(Role.COMMUNITY_ADMIN,      getAuthToken(communityAdmin.getEmail(), password));
+        TOKENS.put(Role.SUBCOMMUNITY_ADMIN,   getAuthToken(subCommunityAdmin.getEmail(), password));
+        TOKENS.put(Role.COLLECTION_ADMIN,     getAuthToken(collectionAdmin.getEmail(), password));
+        TOKENS.put(Role.SUBMITTER,            getAuthToken(submitter.getEmail(),      password));
+
+        /* ---------- Misc test config ---------- */
         configurationService.setProperty(
-            "org.dspace.app.rest.authorization.AlwaysThrowExceptionFeature.turnoff", "true");
+                "org.dspace.app.rest.authorization.AlwaysThrowExceptionFeature.turnoff", "true");
+
+        INITIALISED = true;
     }
 
-    @Test
-    public void testAdmin() throws Exception {
-        String token = getAuthToken(admin.getEmail(), password);
-
-        // Verify the general admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
+    /* ------------------------------------------------------------
+     * Role/expectation table (the “role matrix”)
+     * ---------------------------------------------------------- */
+    private static Object[][] roleMatrix() {
+        return new Object[][] {
+            { Role.ADMIN,              true  },
+            { Role.COMMUNITY_ADMIN,    true  },
+            { Role.SUBCOMMUNITY_ADMIN, true  },
+            { Role.COLLECTION_ADMIN,   true  },
+            { Role.SUBMITTER,          false }
+        };
     }
 
+    /* ------------------------------------------------------------
+     * Single test that iterates over the matrix
+     * ---------------------------------------------------------- */
     @Test
-    public void testCommunityAdmin() throws Exception {
-        String token = getAuthToken(communityAdmin.getEmail(), password);
+    public void defaultConfiguration_roleMatrix() throws Exception {
 
-        // Verify the community admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
+        for (Object[] row : roleMatrix()) {
+            Role role       = (Role)    row[0];
+            boolean allowed = (Boolean) row[1];
+
+            getClient(TOKENS.get(role))
+                .perform(get("/api/authz/authorizations/search/object")
+                         .param("embed", "feature")
+                         .param("uri",   siteUri))
+                .andExpect(status().isOk())
+                .andExpect(allowed
+                    ? jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]").exists()
+                    : jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]").doesNotExist());
+        }
     }
 
-    @Test
-    public void testSubCommunityAdmin() throws Exception {
-        String token = getAuthToken(subCommunityAdmin.getEmail(), password);
-
-        // Verify the subcommunity admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testCollectionAdmin() throws Exception {
-        String token = getAuthToken(collectionAdmin.getEmail(), password);
-
-        // Verify the collection admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubmitter() throws Exception {
-        String token = getAuthToken(submitter.getEmail(), password);
-
-        // Verify a submitter doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfCommunityAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfSubCommunityAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfCollectionAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfSubmitterGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfCommunityAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubCommunityAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfCollectionAdminGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubmitterGroup() throws Exception {
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    // Disabled community configs
-    @Test
-    public void testAdminNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        String token = getAuthToken(admin.getEmail(), password);
-
-        // Verify the general admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testCommunityAdminNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        String token = getAuthToken(communityAdmin.getEmail(), password);
-
-        // Verify the community admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubCommunityAdminNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        String token = getAuthToken(subCommunityAdmin.getEmail(), password);
-
-        // Verify the subcommunity admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testCollectionAdminNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        String token = getAuthToken(collectionAdmin.getEmail(), password);
-
-        // Verify the collection admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubmitterNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        String token = getAuthToken(submitter.getEmail(), password);
-
-        // Verify a submitter doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfCommunityAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfSubCommunityAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfCollectionAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfSubmitterGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfCommunityAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubCommunityAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfCollectionAdminGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubmitterGroupNoCommunityGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    // Disabled collection configs
-    @Test
-    public void testAdminNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(admin.getEmail(), password);
-
-        // Verify the general admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testCommunityAdminNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(communityAdmin.getEmail(), password);
-
-        // Verify the community admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubCommunityAdminNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(subCommunityAdmin.getEmail(), password);
-
-        // Verify the subcommunity admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testCollectionAdminNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(collectionAdmin.getEmail(), password);
-
-        // Verify the collection admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubmitterNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(submitter.getEmail(), password);
-
-        // Verify a submitter doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfCommunityAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfSubCommunityAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfCollectionAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfSubmitterGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfCommunityAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubCommunityAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfCollectionAdminGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubmitterGroupNoCollectionGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    // Disabled community and collection configs
-    @Test
-    public void testAdminNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(admin.getEmail(), password);
-
-        // Verify the general admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testCommunityAdminNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(communityAdmin.getEmail(), password);
-
-        // Verify the community admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubCommunityAdminNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(subCommunityAdmin.getEmail(), password);
-
-        // Verify the subcommunity admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testCollectionAdminNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(collectionAdmin.getEmail(), password);
-
-        // Verify the collection admin has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubmitterNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        String token = getAuthToken(submitter.getEmail(), password);
-
-        // Verify a submitter doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubGroupOfCommunityAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfSubCommunityAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfCollectionAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubGroupOfSubmitterGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        GroupBuilder.createGroup(context)
-            .withName("userGroup")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, Group.ADMIN))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of the site administrators has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID() + "&feature=canManageGroups"))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .exists());
-    }
-
-    @Test
-    public void testSubSubGroupOfCommunityAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + topLevelCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a community admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubCommunityAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COMMUNITY_" + subCommunity.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a subcommunity admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfCollectionAdminGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_ADMIN"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of a collection admin group has this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
-    }
-
-    @Test
-    public void testSubSubGroupOfSubmitterGroupNoComColGroupPermission() throws Exception {
-        configurationService.setProperty(
-            "core.authorization.community-admin.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.admin-group", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.policies", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.submitters", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.workflows", "false");
-        configurationService.setProperty(
-            "core.authorization.community-admin.collection.admin-group", "false");
-
-        context.turnOffAuthorisationSystem();
-        Group groupB = GroupBuilder.createGroup(context)
-            .withName("GroupB")
-            .withParent(groupService.findByName(context, "COLLECTION_" + collection.getID() + "_SUBMIT"))
-            .build();
-        GroupBuilder.createGroup(context)
-            .withName("GroupA")
-            .withParent(groupB)
-            .addMember(eperson)
-            .build();
-        context.restoreAuthSystemState();
-
-        String token = getAuthToken(eperson.getEmail(), password);
-
-        // Verify an ePerson in a sub-subgroup of submitter group doesn't have this feature
-        getClient(token).perform(get("/api/authz/authorizations/search/object?embed=feature&uri="
-            + "http://localhost/api/core/sites/" + siteService.findSite(context).getID()))
-            .andExpect(status().isOk())
-            .andExpect(
-                jsonPath("$._embedded.authorizations[?(@._embedded.feature.id=='canManageGroups')]")
-                    .doesNotExist());
+    /* ------------------------------------------------------------
+     * Helper enum
+     * ---------------------------------------------------------- */
+    private enum Role {
+        ADMIN,
+        COMMUNITY_ADMIN,
+        SUBCOMMUNITY_ADMIN,
+        COLLECTION_ADMIN,
+        SUBMITTER
     }
 }
