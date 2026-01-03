@@ -9,6 +9,14 @@ package org.dspace;
 
 import java.security.Permission;
 
+/**
+ * @deprecated SecurityManager is deprecated for removal in Java 21+.
+ * This class should no longer be used. Tests that rely on catching System.exit()
+ * calls should be refactored to avoid calling System.exit().
+ * See: https://openjdk.org/jeps/411
+ */
+@Deprecated(since = "10.0", forRemoval = true)
+@SuppressWarnings("removal")
 public class NoExitSecurityManager extends SecurityManager {
     @Override
     public void checkPermission(Permission perm) {

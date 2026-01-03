@@ -254,16 +254,8 @@ public final class DSpaceKernelImpl implements DSpaceKernel, DynamicMBean {
         }
     }
 
-    @Override
-    protected void finalize() throws Throwable {
-        try {
-            doDestroy();
-        } catch (Exception e) {
-            log.error("WARN Failure attempting to cleanup the DSpace kernel: {}",
-                    e.getMessage(), e);
-        }
-        super.finalize();
-    }
+    // Note: finalize() method removed for Java 21 compatibility.
+    // Cleanup is handled by the JVM shutdown hook registered in registerShutdownHook()
 
     @Override
     public String toString() {

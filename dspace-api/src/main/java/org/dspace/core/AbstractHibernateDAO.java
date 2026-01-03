@@ -61,7 +61,7 @@ public abstract class AbstractHibernateDAO<T> implements GenericDAO<T> {
 
     @Override
     public void delete(Context context, T t) throws SQLException {
-        getHibernateSession(context).delete(t);
+        getHibernateSession(context).remove(t);
     }
 
     @Override
@@ -316,12 +316,16 @@ public abstract class AbstractHibernateDAO<T> implements GenericDAO<T> {
         return new AbstractIterator<T>() {
             @Override
             protected T computeNext() {
-                return iter.hasNext() ? iter.next() : endOfData();
+                if (iter.hasNext()) {
+                    return iter.next();
+                } else {
+                    // Close the stream when iteration is complete
+                    stream.close();
+                    return endOfData();
+                }
             }
-            @Override
-            public void finalize() {
-                stream.close();
-            }
+            // Note: finalize() method removed for Java 21 compatibility.
+            // The stream is now closed when iteration completes (when endOfData() is reached).
         };
     }
 

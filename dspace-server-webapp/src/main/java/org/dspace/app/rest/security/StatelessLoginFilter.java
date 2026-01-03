@@ -22,7 +22,6 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.authentication.AbstractAuthenticationProcessingFilter;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
 /**
  * This class will filter /api/authn/login requests to try and authenticate them. Keep in mind, this filter runs *after*
@@ -57,7 +56,12 @@ public class StatelessLoginFilter extends AbstractAuthenticationProcessingFilter
     public StatelessLoginFilter(String url, String httpMethod, AuthenticationManager authenticationManager,
                                 RestAuthenticationService restAuthenticationService) {
         // NOTE: attemptAuthentication() below will only be triggered by requests that match both this URL and method
-        super(new AntPathRequestMatcher(url, httpMethod));
+        // Create a RequestMatcher that matches the URL path and HTTP method without using deprecated AntPathRequestMatcher
+        super((request) -> {
+            boolean pathMatches = request.getServletPath().equals(url);
+            boolean methodMatches = httpMethod == null || request.getMethod().equals(httpMethod);
+            return pathMatches && methodMatches;
+        });
         this.authenticationManager = authenticationManager;
         this.restAuthenticationService = restAuthenticationService;
     }
