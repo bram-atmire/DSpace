@@ -53,6 +53,11 @@ public class ContextTest extends AbstractUnitTest {
     private AuthorizeService authorizeServiceSpy;
 
     /**
+     * Original AuthorizeService (saved before spying for restoration in @After)
+     */
+    private AuthorizeService originalAuthorizeService;
+
+    /**
      * This method will be run before every test as per @Before. It will
      * initialize resources required for the tests.
      *
@@ -64,13 +69,35 @@ public class ContextTest extends AbstractUnitTest {
     public void init() {
         super.init();
 
+        // Save the original authorizeService before spying (for restoration in @After)
+        originalAuthorizeService = authorizeService;
+
         // Initialize our spy of the autowired (global) authorizeService bean.
         // This allows us to customize the bean's method return values in tests below
-        authorizeServiceSpy = spy(authorizeService);
+        authorizeServiceSpy = spy(originalAuthorizeService);
         // "Wire" our spy to be used by the current loaded object services
         // (To ensure these services use the spy instead of the real service)
         ReflectionTestUtils.setField(ePersonService, "authorizeService", authorizeServiceSpy);
         ReflectionTestUtils.setField(groupService, "authorizeService", authorizeServiceSpy);
+    }
+
+    /**
+     * This method will be run after every test as per @After. It will
+     * clean resources initialized by the @Before methods.
+     *
+     * Other methods can be annotated with @After here or in subclasses
+     * but no execution order is guaranteed
+     */
+    @org.junit.jupiter.api.AfterEach
+    @Override
+    public void destroy() {
+        // Restore the original authorizeService to prevent test pollution
+        if (originalAuthorizeService != null) {
+            ReflectionTestUtils.setField(ePersonService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(groupService, "authorizeService", originalAuthorizeService);
+        }
+
+        super.destroy();
     }
 
     /**

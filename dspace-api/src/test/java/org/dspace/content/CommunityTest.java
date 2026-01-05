@@ -72,6 +72,11 @@ public class CommunityTest extends AbstractDSpaceObjectTest {
     private AuthorizeService authorizeServiceSpy;
 
     /**
+     * Original AuthorizeService (saved before spying for restoration in @After)
+     */
+    private AuthorizeService originalAuthorizeService;
+
+    /**
      * This method will be run before every test as per @Before. It will
      * initialize resources required for the tests.
      *
@@ -91,9 +96,12 @@ public class CommunityTest extends AbstractDSpaceObjectTest {
             //we need to commit the changes so we don't block the table for testing
             context.restoreAuthSystemState();
 
+            // Save the original authorizeService before spying (for restoration in @After)
+            originalAuthorizeService = authorizeService;
+
             // Initialize our spy of the autowired (global) authorizeService bean.
             // This allows us to customize the bean's method return values in tests below
-            authorizeServiceSpy = spy(authorizeService);
+            authorizeServiceSpy = spy(originalAuthorizeService);
             // "Wire" our spy to be used by the current loaded object services
             // (To ensure both these services use the spy instead of the real service)
             ReflectionTestUtils.setField(communityService, "authorizeService", authorizeServiceSpy);
@@ -131,6 +139,15 @@ public class CommunityTest extends AbstractDSpaceObjectTest {
         context.restoreAuthSystemState();
 
         c = null;
+
+        // Restore the original authorizeService to prevent test pollution
+        if (originalAuthorizeService != null) {
+            ReflectionTestUtils.setField(communityService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(collectionService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(itemService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(AuthorizeServiceFactory.getInstance(), "authorizeService", originalAuthorizeService);
+        }
+
         super.destroy();
     }
 

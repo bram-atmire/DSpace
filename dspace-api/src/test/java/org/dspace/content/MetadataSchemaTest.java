@@ -58,6 +58,11 @@ public class MetadataSchemaTest extends AbstractUnitTest {
     private AuthorizeService authorizeServiceSpy;
 
     /**
+     * Original AuthorizeService (saved before spying for restoration in @After)
+     */
+    private AuthorizeService originalAuthorizeService;
+
+    /**
      * This method will be run before every test as per @Before. It will
      * initialize resources required for the tests.
      *
@@ -71,9 +76,12 @@ public class MetadataSchemaTest extends AbstractUnitTest {
         try {
             this.ms = metadataSchemaService.find(context, MetadataSchemaEnum.DC.getName());
 
+            // Save the original authorizeService before spying (for restoration in @After)
+            originalAuthorizeService = authorizeService;
+
             // Initialize our spy of the autowired (global) authorizeService bean.
             // This allows us to customize the bean's method return values in tests below
-            authorizeServiceSpy = spy(authorizeService);
+            authorizeServiceSpy = spy(originalAuthorizeService);
             // "Wire" our spy to be used by the current loaded object services
             // (To ensure these services use the spy instead of the real service)
             ReflectionTestUtils.setField(metadataSchemaService, "authorizeService", authorizeServiceSpy);
@@ -81,6 +89,24 @@ public class MetadataSchemaTest extends AbstractUnitTest {
             log.error("SQL Error in init", ex);
             fail("SQL Error in init: " + ex.getMessage());
         }
+    }
+
+    /**
+     * This method will be run after every test as per @After. It will
+     * clean resources initialized by the @Before methods.
+     *
+     * Other methods can be annotated with @After here or in subclasses
+     * but no execution order is guaranteed
+     */
+    @org.junit.jupiter.api.AfterEach
+    @Override
+    public void destroy() {
+        // Restore the original authorizeService to prevent test pollution
+        if (originalAuthorizeService != null) {
+            ReflectionTestUtils.setField(metadataSchemaService, "authorizeService", originalAuthorizeService);
+        }
+
+        super.destroy();
     }
 
     /**

@@ -91,6 +91,11 @@ public class ItemTest extends AbstractDSpaceObjectTest {
      */
     private AuthorizeService authorizeServiceSpy;
 
+    /**
+     * Original AuthorizeService (saved before spying for restoration in @After)
+     */
+    private AuthorizeService originalAuthorizeService;
+
 
     /**
      * This method will be run before every test as per @Before. It will
@@ -113,9 +118,12 @@ public class ItemTest extends AbstractDSpaceObjectTest {
             this.dspaceObject = it;
             context.restoreAuthSystemState();
 
+            // Save the original authorizeService before spying (for restoration in @After)
+            originalAuthorizeService = authorizeService;
+
             // Initialize our spy of the autowired (global) authorizeService bean.
             // This allows us to customize the bean's method return values in tests below
-            authorizeServiceSpy = spy(authorizeService);
+            authorizeServiceSpy = spy(originalAuthorizeService);
             // "Wire" our spy to be used by the current loaded object services
             // (To ensure these services use the spy instead of the real service)
             ReflectionTestUtils.setField(collectionService, "authorizeService", authorizeServiceSpy);
@@ -168,6 +176,17 @@ public class ItemTest extends AbstractDSpaceObjectTest {
         it = null;
         collection = null;
         owningCommunity = null;
+
+        // Restore the original authorizeService to prevent test pollution
+        if (originalAuthorizeService != null) {
+            ReflectionTestUtils.setField(collectionService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(itemService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(workspaceItemService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(bundleService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(bitstreamService, "authorizeService", originalAuthorizeService);
+            ReflectionTestUtils.setField(AuthorizeServiceFactory.getInstance(), "authorizeService", originalAuthorizeService);
+        }
+
         try {
             super.destroy();
         } catch (Exception e) {

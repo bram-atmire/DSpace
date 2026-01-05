@@ -69,6 +69,11 @@ public class BitstreamFormatTest extends AbstractUnitTest {
     private AuthorizeService authorizeServiceSpy;
 
     /**
+     * Original AuthorizeService (saved before spying for restoration in @After)
+     */
+    private AuthorizeService originalAuthorizeService;
+
+    /**
      * This method will be run before every test as per @Before. It will
      * initialize resources required for the tests.
      *
@@ -83,9 +88,12 @@ public class BitstreamFormatTest extends AbstractUnitTest {
             bf = bitstreamFormatService.find(context, 5);
             bunknown = bitstreamFormatService.findUnknown(context);
 
+            // Save the original authorizeService before spying (for restoration in @After)
+            originalAuthorizeService = authorizeService;
+
             // Initialize our spy of the autowired (global) authorizeService bean.
             // This allows us to customize the bean's method return values in tests below
-            authorizeServiceSpy = spy(authorizeService);
+            authorizeServiceSpy = spy(originalAuthorizeService);
             // "Wire" our spy to be used by the current loaded bitstreamFormatService
             // (To ensure it uses the spy instead of the real service)
             ReflectionTestUtils.setField(bitstreamFormatService, "authorizeService", authorizeServiceSpy);
@@ -107,6 +115,12 @@ public class BitstreamFormatTest extends AbstractUnitTest {
     public void destroy() {
         bf = null;
         bunknown = null;
+
+        // Restore the original authorizeService to prevent test pollution
+        if (originalAuthorizeService != null) {
+            ReflectionTestUtils.setField(bitstreamFormatService, "authorizeService", originalAuthorizeService);
+        }
+
         super.destroy();
     }
 
