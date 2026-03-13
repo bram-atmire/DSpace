@@ -10,6 +10,7 @@ package org.dspace.identifier.doi;
 
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Arrays;
@@ -21,10 +22,10 @@ import jakarta.mail.MessagingException;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
 import org.apache.commons.cli.DefaultParser;
-import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.help.HelpFormatter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.dspace.content.DSpaceObject;
@@ -130,7 +131,7 @@ public class DOIOrganiser {
 
         Option filterDoi = Option.builder().optionalArg(true).longOpt("filter").hasArg().argName("filterName")
                 .desc("Use the specified filter name instead of the provider's filter. Defaults to a special " +
-                "'always true' filter to force operations").build();
+                "'always true' filter to force operations").get();
         options.addOption(filterDoi);
 
         Option registerDoi = Option.builder()
@@ -140,7 +141,7 @@ public class DOIOrganiser {
                 .desc("Register a specified identifier. "
                         + "You can specify the identifier by ItemID, Handle or"
                         + " DOI.")
-                .build();
+                .get();
 
         options.addOption(registerDoi);
 
@@ -151,7 +152,7 @@ public class DOIOrganiser {
                 .desc("Reserve a specified identifier online. "
                         + "You can specify the identifier by ItemID, Handle or "
                         + "DOI.")
-                .build();
+                .get();
 
         options.addOption(reserveDoi);
 
@@ -162,7 +163,7 @@ public class DOIOrganiser {
                 .desc("Update online an object for a given DOI identifier"
                         + " or ItemID or Handle. A DOI identifier or an ItemID or a"
                         + " Handle is needed.")
-                .build();
+                .get();
 
         options.addOption(update);
 
@@ -171,14 +172,14 @@ public class DOIOrganiser {
                 .longOpt("delete-doi")
                 .hasArg()
                 .desc("Delete a specified identifier.")
-                .build();
+                .get();
 
         options.addOption(delete);
 
         // initialize parser
         CommandLineParser parser = new DefaultParser();
         CommandLine line = null;
-        HelpFormatter helpformater = new HelpFormatter();
+        HelpFormatter helpformater = HelpFormatter.builder().get();
 
         try {
             line = parser.parse(options, args);
@@ -190,7 +191,11 @@ public class DOIOrganiser {
         // process options
         // user asks for help
         if (line.hasOption('h') || 0 == line.getOptions().length) {
-            helpformater.printHelp("\nDOI organiser\n", options);
+            try {
+                helpformater.printHelp("DOI organiser", null, options, null, false);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
         }
 
         if (line.hasOption('q')) {
@@ -324,7 +329,11 @@ public class DOIOrganiser {
             String identifier = line.getOptionValue("reserve-doi");
 
             if (null == identifier) {
-                helpformater.printHelp("\nDOI organiser\n", options);
+                try {
+                    helpformater.printHelp("DOI organiser", null, options, null, false);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             } else {
                 try {
                     DOI doiRow = organiser.resolveToDOI(identifier);
@@ -339,7 +348,11 @@ public class DOIOrganiser {
             String identifier = line.getOptionValue("register-doi");
 
             if (null == identifier) {
-                helpformater.printHelp("\nDOI organiser\n", options);
+                try {
+                    helpformater.printHelp("DOI organiser", null, options, null, false);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             } else {
                 try {
                     DOI doiRow = organiser.resolveToDOI(identifier);
@@ -354,7 +367,11 @@ public class DOIOrganiser {
             String identifier = line.getOptionValue("update-doi");
 
             if (null == identifier) {
-                helpformater.printHelp("\nDOI organiser\n", options);
+                try {
+                    helpformater.printHelp("DOI organiser", null, options, null, false);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             } else {
                 try {
                     DOI doiRow = organiser.resolveToDOI(identifier);
@@ -369,7 +386,11 @@ public class DOIOrganiser {
             String identifier = line.getOptionValue("delete-doi");
 
             if (null == identifier) {
-                helpformater.printHelp("\nDOI organiser\n", options);
+                try {
+                    helpformater.printHelp("DOI organiser", null, options, null, false);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
             } else {
                 try {
                     organiser.delete(identifier);
@@ -608,8 +629,8 @@ public class DOIOrganiser {
         } catch (IdentifierException ex) {
             String message;
             if (!(ex instanceof DOIIdentifierException)) {
-                message = String.format("Registering DOI %s for object %s:  the registrar returned an error.",
-                                        doiRow.getDoi(), dso.getID());
+                message = "Registering DOI %s for object %s:  the registrar returned an error.".formatted(
+                    doiRow.getDoi(), dso.getID());
             } else {
                 DOIIdentifierException doiIdentifierException = (DOIIdentifierException) ex;
                 message = "It wasn't possible to update this identifier:  "

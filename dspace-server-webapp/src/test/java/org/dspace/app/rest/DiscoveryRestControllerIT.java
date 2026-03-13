@@ -38,7 +38,6 @@ import java.nio.charset.Charset;
 import java.time.Period;
 import java.util.UUID;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.matchers.JsonPathMatchers;
 import org.apache.commons.codec.CharEncoding;
 import org.apache.commons.io.IOUtils;
@@ -84,10 +83,13 @@ import org.dspace.supervision.SupervisionOrder;
 import org.dspace.xmlworkflow.storedcomponents.ClaimedTask;
 import org.dspace.xmlworkflow.storedcomponents.XmlWorkflowItem;
 import org.hamcrest.Matchers;
-import org.junit.Ignore;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
+import tools.jackson.databind.ObjectMapper;
 
 public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest {
     @Autowired
@@ -108,6 +110,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
      */
     boolean escapeHTML;
 
+    @BeforeEach
     @Override
     public void setUp() throws Exception {
         super.setUp();
@@ -116,6 +119,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
         context.restoreAuthSystemState();
     }
 
+    @AfterEach
     @Override
     public void destroy() throws Exception {
         context.turnOffAuthorisationSystem();
@@ -592,9 +596,6 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
         configurationService.setProperty("authority.controlled.dc.contributor.author", "true");
 
         metadataAuthorityService.clearCache();
-        // Ensure ChoiceAuthorityService is initialized before clearing cache
-        choiceAuthorityService.getChoiceAuthoritiesNames();
-        choiceAuthorityService.clearCache();
 
         context.turnOffAuthorisationSystem();
 
@@ -2040,7 +2041,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
     // This test has been disable due to its innate dependency on knowing the facetLimit
     // This is currently untrue and resulted in hardcoding of expectations.
     @Test
-    @Ignore
+    @Disabled
     public void discoverFacetsDateTestWithLabels() throws Exception {
         //We turn off the authorization system in order to create the structure as defined below
         context.turnOffAuthorisationSystem();
@@ -2409,7 +2410,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
 
     //TODO Enable when solr fulltext indexing is policy-aware, see https://jira.duraspace.org/browse/DS-3758
     @Test
-    @Ignore
+    @Disabled
     public void discoverSearchObjectsTestWithContentInAPrivateBitstream() throws Exception {
         //We turn off the authorization system in order to create the structure as defined below
         context.turnOffAuthorisationSystem();
@@ -2708,14 +2709,16 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
             .withName("Community")
             .build();
 
+        // enable the workflow, otherwise the item would be archived immediately
         Collection collection1 = CollectionBuilder.createCollection(context, community)
             .withName("Collection 1")
-            .withWorkflowGroup(1, admin) // enable the workflow, otherwise the item would be archived immediately
+            .withWorkflowGroup("reviewer", admin)
             .build();
 
+        // enable the workflow, otherwise the item would be archived immediately
         Collection collection2 = CollectionBuilder.createCollection(context, community)
             .withName("Collection 2")
-            .withWorkflowGroup(1, admin) // enable the workflow, otherwise the item would be archived immediately
+            .withWorkflowGroup("reviewer", admin)
             .build();
 
         XmlWorkflowItem wfi1 = WorkflowItemBuilder.createWorkflowItem(context, collection1)
@@ -4060,7 +4063,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
         // the second collection has a workflow active
         Collection col2 = CollectionBuilder.createCollection(context, child1)
                                 .withName("Collection 2")
-                                .withWorkflowGroup(1, admin)
+                                .withWorkflowGroup("reviewer", admin)
                                 .build();
 
         // 2. Three public items that are readable by Anonymous with different subjects
@@ -4185,7 +4188,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
         // the second collection has a workflow active
         Collection col2 = CollectionBuilder.createCollection(context, child1)
                                 .withName("Collection 2")
-                                .withWorkflowGroup(1, admin)
+                                .withWorkflowGroup("reviewer", admin)
                                 .build();
 
         // 2. Three public items that are readable by Anonymous
@@ -4382,8 +4385,8 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
         // the second collection has two workflow steps active
         Collection col2 = CollectionBuilder.createCollection(context, child1)
                                 .withName("Collection 2")
-                                .withWorkflowGroup(1, admin, reviewer1)
-                                .withWorkflowGroup(2, reviewer2)
+                                .withWorkflowGroup("reviewer", admin, reviewer1)
+                                .withWorkflowGroup("editor", reviewer2)
                                 .build();
 
         // 2. Three public items that are readable by Anonymous with different subjects
@@ -4637,8 +4640,8 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
         // the second collection has two workflow steps active
         Collection col2 = CollectionBuilder.createCollection(context, child1)
                                 .withName("Collection 2")
-                                .withWorkflowGroup(1, admin, reviewer1)
-                                .withWorkflowGroup(2, reviewer2)
+                                .withWorkflowGroup("reviewer", admin, reviewer1)
+                                .withWorkflowGroup("editor", reviewer2)
                                 .build();
 
         // 2. Three public items that are readable by Anonymous with different subjects
@@ -5514,7 +5517,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
 
         Collection col = CollectionBuilder.createCollection(context, parentCommunity)
                                            .withName("Collection 1")
-                                           .withWorkflowGroup(1, reviewer, admin).build();
+                                           .withWorkflowGroup("reviewer", reviewer, admin).build();
 
         ItemBuilder.createItem(context, col)
                    .withTitle("Punnett square")
@@ -5590,7 +5593,7 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
 
         Collection col = CollectionBuilder.createCollection(context, parentCommunity)
                                            .withName("Collection 1")
-                                           .withWorkflowGroup(1, reviewer, admin).build();
+                                           .withWorkflowGroup("reviewer", reviewer, admin).build();
 
         ItemBuilder.createItem(context, col)
                    .withTitle("Punnett square")
@@ -6354,8 +6357,8 @@ public class DiscoveryRestControllerIT extends AbstractControllerIntegrationTest
         // the second collection has two workflow steps active
         Collection col2 = CollectionBuilder.createCollection(context, child1)
                                            .withName("Collection 2")
-                                           .withWorkflowGroup(1, admin, reviewer1)
-                                           .withWorkflowGroup(2, reviewer2)
+                                           .withWorkflowGroup("reviewer", admin, reviewer1)
+                                           .withWorkflowGroup("editor", reviewer2)
                                            .build();
 
         // 2. Three public items that are readable by Anonymous with different subjects
