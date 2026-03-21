@@ -15,6 +15,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import org.apache.commons.codec.CharEncoding;
 import org.apache.commons.io.IOUtils;
@@ -30,6 +33,7 @@ import org.dspace.app.rest.projection.Projection;
 import org.dspace.app.rest.test.AbstractControllerIntegrationTest;
 import org.dspace.app.rest.utils.Utils;
 import org.dspace.authorize.service.ResourcePolicyService;
+import org.dspace.builder.AbstractBuilder;
 import org.dspace.builder.BitstreamBuilder;
 import org.dspace.builder.CollectionBuilder;
 import org.dspace.builder.CommunityBuilder;
@@ -40,14 +44,28 @@ import org.dspace.content.Collection;
 import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.WorkspaceItem;
+import org.dspace.content.factory.ContentServiceFactory;
+import org.dspace.content.service.BitstreamService;
+import org.dspace.content.service.CollectionService;
+import org.dspace.content.service.CommunityService;
+import org.dspace.content.service.ItemService;
 import org.dspace.core.Constants;
+import org.dspace.core.Context;
 import org.dspace.services.ConfigurationService;
 import org.hamcrest.Matchers;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 
+/**
+ * Integration tests for the requestCopy authorization feature.
+ * <p>
+ * Shared test fixtures are created once on the first test's
+ * {@code @BeforeEach} and reused across all tests via static UUID fields.
+ * </p>
+ */
 public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
 
     @Autowired
@@ -68,10 +86,17 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
     @Autowired
     private ConfigurationService configurationService;
 
+    @Autowired
+    private CollectionService collectionService;
+
+    @Autowired
+    private ItemService itemService;
+
+    @Autowired
+    private BitstreamService bitstreamService;
 
     @Autowired
     private Utils utils;
-
 
     private AuthorizationFeature requestCopyFeature;
 
@@ -85,6 +110,19 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
 
     private Bitstream bitstreamFromCollection;
 
+    // Static UUIDs for reloading shared fixtures across test instances
+    private static UUID communityAId;
+    private static UUID collectionAId;
+    private static UUID itemAId;
+    private static UUID bitstreamAId;
+    private static UUID bitstreamBId;
+    private static UUID itemInWorkSpaceId;
+    private static UUID bitstreamFromWorkSpaceItemId;
+    private static UUID bitstreamFromCollectionId;
+    private static boolean sharedFixturesCreated = false;
+
+    private static final Map<String, String> authTokenCache =
+        new HashMap<>();
 
     @Override
     @BeforeEach
@@ -92,39 +130,118 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         super.setUp();
 
         configurationService.setProperty("request.item.type", "all");
+        requestCopyFeature = authorizationFeatureService
+            .find(RequestCopyFeature.NAME);
 
-        context.turnOffAuthorisationSystem();
-        requestCopyFeature = authorizationFeatureService.find(RequestCopyFeature.NAME);
+        if (!sharedFixturesCreated) {
+            context.turnOffAuthorisationSystem();
 
-        String bitstreamContent = "Dummy content";
+            String bitstreamContent = "Dummy content";
 
-        Community communityA = CommunityBuilder.createCommunity(context).build();
-        collectionA = CollectionBuilder.createCollection(context, communityA).withLogo("Blub").build();
-        bitstreamFromCollection = collectionA.getLogo();
+            Community communityA = CommunityBuilder
+                .createCommunity(context).build();
+            collectionA = CollectionBuilder
+                .createCollection(context, communityA)
+                .withLogo("Blub").build();
+            bitstreamFromCollection = collectionA.getLogo();
 
-        itemA = ItemBuilder.createItem(context, collectionA).build();
+            itemA = ItemBuilder.createItem(context, collectionA)
+                .build();
 
-        try (InputStream is = IOUtils.toInputStream(bitstreamContent, CharEncoding.UTF_8)) {
-            bitstreamA = BitstreamBuilder.createBitstream(context, itemA, is)
-                                         .withName("Bitstream")
-                                         .withDescription("Description")
-                                         .withMimeType("text/plain")
-                                         .build();
-            bitstreamB = BitstreamBuilder.createBitstream(context, itemA, is)
-                                         .withName("Bitstream2")
-                                         .withDescription("Description2")
-                                         .withMimeType("text/plain")
-                                         .build();
-            WorkspaceItem workspaceItem = WorkspaceItemBuilder.createWorkspaceItem(context, collectionA)
-                                                              .withFulltext("Test", "source", is)
-                                                              .build();
-            itemInWorkSpace = workspaceItem.getItem();
-            bitstreamFromWorkSpaceItem = itemInWorkSpace.getBundles("ORIGINAL").get(0).getBitstreams().get(0);
+            try (InputStream is = IOUtils.toInputStream(
+                    bitstreamContent, CharEncoding.UTF_8)) {
+                bitstreamA = BitstreamBuilder
+                    .createBitstream(context, itemA, is)
+                    .withName("Bitstream")
+                    .withDescription("Description")
+                    .withMimeType("text/plain")
+                    .build();
+                bitstreamB = BitstreamBuilder
+                    .createBitstream(context, itemA, is)
+                    .withName("Bitstream2")
+                    .withDescription("Description2")
+                    .withMimeType("text/plain")
+                    .build();
+                WorkspaceItem workspaceItem = WorkspaceItemBuilder
+                    .createWorkspaceItem(context, collectionA)
+                    .withFulltext("Test", "source", is)
+                    .build();
+                itemInWorkSpace = workspaceItem.getItem();
+                bitstreamFromWorkSpaceItem = itemInWorkSpace
+                    .getBundles("ORIGINAL").get(0)
+                    .getBitstreams().get(0);
+            }
+            resourcePolicyService.removePolicies(
+                context, bitstreamB, Constants.READ);
+
+            context.restoreAuthSystemState();
+
+            // Store UUIDs for reloading
+            communityAId = communityA.getID();
+            collectionAId = collectionA.getID();
+            itemAId = itemA.getID();
+            bitstreamAId = bitstreamA.getID();
+            bitstreamBId = bitstreamB.getID();
+            itemInWorkSpaceId = itemInWorkSpace.getID();
+            bitstreamFromWorkSpaceItemId =
+                bitstreamFromWorkSpaceItem.getID();
+            bitstreamFromCollectionId =
+                bitstreamFromCollection.getID();
+
+            context.commit();
+            AbstractBuilder.cleanupBuilderCache();
+            sharedFixturesCreated = true;
+        } else {
+            // Reload shared fixtures from UUIDs
+            collectionA = collectionService.find(context,
+                collectionAId);
+            itemA = itemService.find(context, itemAId);
+            bitstreamA = bitstreamService.find(context,
+                bitstreamAId);
+            bitstreamB = bitstreamService.find(context,
+                bitstreamBId);
+            itemInWorkSpace = itemService.find(context,
+                itemInWorkSpaceId);
+            bitstreamFromWorkSpaceItem = bitstreamService.find(
+                context, bitstreamFromWorkSpaceItemId);
+            bitstreamFromCollection = bitstreamService.find(
+                context, bitstreamFromCollectionId);
         }
-        resourcePolicyService.removePolicies(context, bitstreamB, Constants.READ);
 
+        // Reload eperson into current session
+        eperson = context.reloadEntity(eperson);
+    }
 
-        context.restoreAuthSystemState();
+    /**
+     * Clean up shared fixtures after all tests have completed.
+     */
+    @AfterAll
+    public static void tearDownSharedFixtures() throws Exception {
+        if (!sharedFixturesCreated) {
+            return;
+        }
+        Context ctx = new Context(Context.Mode.READ_WRITE);
+        ctx.turnOffAuthorisationSystem();
+
+        CommunityService comService =
+            ContentServiceFactory.getInstance().getCommunityService();
+        Community com = comService.find(ctx, communityAId);
+        if (com != null) {
+            comService.delete(ctx, com);
+        }
+
+        ctx.complete();
+        sharedFixturesCreated = false;
+        authTokenCache.clear();
+    }
+
+    private String getCachedAuthToken(String email) throws Exception {
+        String token = authTokenCache.get(email);
+        if (token == null) {
+            token = getAuthToken(email, password);
+            authTokenCache.put(email, token);
+        }
+        return token;
     }
 
 
@@ -133,7 +250,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         CollectionRest collectionRest = collectionConverter.convert(collectionA, Projection.DEFAULT);
         String collectionUri = utils.linkToSingleResource(collectionRest, "self").getHref();
 
-        String token = getAuthToken(admin.getEmail(), password);
+        String token = getCachedAuthToken(admin.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", collectionUri)
@@ -148,7 +265,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         ItemRest itemRest = itemConverter.convert(itemA, Projection.DEFAULT);
         String itemUri = utils.linkToSingleResource(itemRest, "self").getHref();
 
-        String token = getAuthToken(admin.getEmail(), password);
+        String token = getCachedAuthToken(admin.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", itemUri)
@@ -164,7 +281,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         ItemRest itemRest = itemConverter.convert(itemInWorkSpace, Projection.DEFAULT);
         String itemUri = utils.linkToSingleResource(itemRest, "self").getHref();
 
-        String token = getAuthToken(admin.getEmail(), password);
+        String token = getCachedAuthToken(admin.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", itemUri)
@@ -180,7 +297,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamA, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(admin.getEmail(), password);
+        String token = getCachedAuthToken(admin.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -196,7 +313,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamB, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(admin.getEmail(), password);
+        String token = getCachedAuthToken(admin.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -212,7 +329,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamFromWorkSpaceItem, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(admin.getEmail(), password);
+        String token = getCachedAuthToken(admin.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -228,7 +345,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamFromCollection, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(admin.getEmail(), password);
+        String token = getCachedAuthToken(admin.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -347,7 +464,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         CollectionRest collectionRest = collectionConverter.convert(collectionA, Projection.DEFAULT);
         String collectionUri = utils.linkToSingleResource(collectionRest, "self").getHref();
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", collectionUri)
@@ -363,7 +480,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         String itemUri = utils.linkToSingleResource(itemRest, "self").getHref();
         Authorization authorizationFeature = new Authorization(eperson, requestCopyFeature, itemRest);
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
@@ -380,7 +497,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         ItemRest itemRest = itemConverter.convert(itemInWorkSpace, Projection.DEFAULT);
         String itemUri = utils.linkToSingleResource(itemRest, "self").getHref();
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
@@ -397,7 +514,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamA, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
@@ -415,7 +532,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
         Authorization authorizationFeature = new Authorization(eperson, requestCopyFeature, bitstreamRest);
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -432,7 +549,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamFromWorkSpaceItem, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -448,7 +565,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamFromCollection, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -481,7 +598,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
         Authorization authorizationFeature = new Authorization(eperson, requestCopyFeature, bitstreamRest);
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -515,7 +632,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamB, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
@@ -547,7 +664,7 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         BitstreamRest bitstreamRest = bitstreamConverter.convert(bitstreamB, Projection.DEFAULT);
         String bitstreamUri = utils.linkToSingleResource(bitstreamRest, "self").getHref();
 
-        String token = getAuthToken(eperson.getEmail(), password);
+        String token = getCachedAuthToken(eperson.getEmail());
 
         getClient(token).perform(get("/api/authz/authorizations/search/object")
                                          .param("uri", bitstreamUri)
