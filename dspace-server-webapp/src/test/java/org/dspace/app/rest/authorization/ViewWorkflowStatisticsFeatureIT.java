@@ -14,6 +14,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
 
 import org.apache.commons.codec.CharEncoding;
 import org.apache.commons.io.IOUtils;
@@ -28,6 +31,7 @@ import org.dspace.app.rest.model.SiteRest;
 import org.dspace.app.rest.projection.Projection;
 import org.dspace.app.rest.test.AbstractControllerIntegrationTest;
 import org.dspace.app.rest.utils.Utils;
+import org.dspace.builder.AbstractBuilder;
 import org.dspace.builder.BitstreamBuilder;
 import org.dspace.builder.BundleBuilder;
 import org.dspace.builder.CollectionBuilder;
@@ -39,14 +43,26 @@ import org.dspace.content.Collection;
 import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.Site;
+import org.dspace.content.factory.ContentServiceFactory;
+import org.dspace.content.service.BitstreamService;
+import org.dspace.content.service.BundleService;
+import org.dspace.content.service.CollectionService;
+import org.dspace.content.service.CommunityService;
+import org.dspace.content.service.ItemService;
 import org.dspace.content.service.SiteService;
+import org.dspace.core.Context;
 import org.dspace.services.ConfigurationService;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
- * Test for the canViewWorkflowStatistics authorization feature
+ * Test for the canViewWorkflowStatistics authorization feature.
+ * <p>
+ * Shared test fixtures are created once on the first test's
+ * {@code @BeforeEach} and reused across all tests via static UUID fields.
+ * </p>
  */
 public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrationTest {
 
@@ -71,6 +87,21 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
     @Autowired
     SiteService siteService;
 
+    @Autowired
+    private CommunityService communityService;
+
+    @Autowired
+    private CollectionService collectionService;
+
+    @Autowired
+    private ItemService itemService;
+
+    @Autowired
+    private BundleService bundleService;
+
+    @Autowired
+    private BitstreamService bitstreamService;
+
     private Site site;
     private SiteRest siteRest;
     private Community communityA;
@@ -84,43 +115,119 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
 
     final String feature = "canViewWorkflowStatistics";
 
+    // Static UUIDs for reloading shared fixtures
+    private static UUID communityAId;
+    private static UUID collectionAId;
+    private static UUID itemAId;
+    private static UUID bundleAId;
+    private static UUID bitstreamAId;
+    private static boolean sharedFixturesCreated = false;
+
+    private static final Map<String, String> authTokenCache =
+        new HashMap<>();
+
     @Override
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        context.turnOffAuthorisationSystem();
 
         site = siteService.findSite(context);
-        communityA = CommunityBuilder.createCommunity(context)
-            .withName("communityA")
-            .build();
-        collectionA = CollectionBuilder.createCollection(context, communityA)
-            .withName("collectionA")
-            .build();
-        itemA = ItemBuilder.createItem(context, collectionA)
-            .withTitle("itemA")
-            .build();
-        bundleA = BundleBuilder.createBundle(context, itemA)
-            .withName("ORIGINAL")
-            .build();
-        String bitstreamContent = "Dummy content";
-        try (InputStream is = IOUtils.toInputStream(bitstreamContent, CharEncoding.UTF_8)) {
-            bitstreamA = BitstreamBuilder.createBitstream(context, bundleA, is)
-                .withName("bistreamA")
+
+        if (!sharedFixturesCreated) {
+            context.turnOffAuthorisationSystem();
+
+            communityA = CommunityBuilder.createCommunity(context)
+                .withName("communityA")
                 .build();
+            collectionA = CollectionBuilder
+                .createCollection(context, communityA)
+                .withName("collectionA")
+                .build();
+            itemA = ItemBuilder.createItem(context, collectionA)
+                .withTitle("itemA")
+                .build();
+            bundleA = BundleBuilder.createBundle(context, itemA)
+                .withName("ORIGINAL")
+                .build();
+            String bitstreamContent = "Dummy content";
+            try (InputStream is = IOUtils.toInputStream(
+                    bitstreamContent, CharEncoding.UTF_8)) {
+                bitstreamA = BitstreamBuilder
+                    .createBitstream(context, bundleA, is)
+                    .withName("bistreamA")
+                    .build();
+            }
+
+            context.restoreAuthSystemState();
+
+            communityAId = communityA.getID();
+            collectionAId = collectionA.getID();
+            itemAId = itemA.getID();
+            bundleAId = bundleA.getID();
+            bitstreamAId = bitstreamA.getID();
+
+            context.commit();
+            AbstractBuilder.cleanupBuilderCache();
+            sharedFixturesCreated = true;
+        } else {
+            communityA = communityService.find(context,
+                communityAId);
+            collectionA = collectionService.find(context,
+                collectionAId);
+            itemA = itemService.find(context, itemAId);
+            bundleA = bundleService.find(context, bundleAId);
+            bitstreamA = bitstreamService.find(context,
+                bitstreamAId);
         }
 
-        context.restoreAuthSystemState();
+        eperson = context.reloadEntity(eperson);
 
         siteRest = siteConverter.convert(site, Projection.DEFAULT);
-        communityARest = communityConverter.convert(communityA, Projection.DEFAULT);
-        collectionARest = collectionConverter.convert(collectionA, Projection.DEFAULT);
-        bitstreamARest = bitstreamConverter.convert(bitstreamA, Projection.DEFAULT);
+        communityARest = communityConverter.convert(
+            communityA, Projection.DEFAULT);
+        collectionARest = collectionConverter.convert(
+            collectionA, Projection.DEFAULT);
+        bitstreamARest = bitstreamConverter.convert(
+            bitstreamA, Projection.DEFAULT);
+    }
+
+    /**
+     * Clean up shared fixtures after all tests have completed.
+     */
+    @AfterAll
+    public static void tearDownSharedFixtures() throws Exception {
+        if (!sharedFixturesCreated) {
+            return;
+        }
+        Context ctx = new Context(Context.Mode.READ_WRITE);
+        ctx.turnOffAuthorisationSystem();
+
+        CommunityService comService =
+            ContentServiceFactory.getInstance()
+                .getCommunityService();
+        Community com = comService.find(ctx, communityAId);
+        if (com != null) {
+            comService.delete(ctx, com);
+        }
+
+        ctx.complete();
+        sharedFixturesCreated = false;
+        authTokenCache.clear();
+    }
+
+    private String getCachedAuthToken(String email)
+        throws Exception {
+        String token = authTokenCache.get(email);
+        if (token == null) {
+            token = getAuthToken(email, password);
+            authTokenCache.put(email, token);
+        }
+        return token;
     }
 
     @Test
     public void adminBitstreamTestNotFound() throws Exception {
-        String adminToken = getAuthToken(admin.getEmail(), password);
+        String adminToken = getCachedAuthToken(admin.getEmail());
         getClient(adminToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -133,7 +240,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
 
     @Test
     public void adminCollectionAdminRequiredSuccess() throws Exception {
-        String adminToken = getAuthToken(admin.getEmail(), password);
+        String adminToken = getCachedAuthToken(admin.getEmail());
         getClient(adminToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -146,7 +253,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
 
     @Test
     public void adminCommunityAdminRequiredSuccess() throws Exception {
-        String adminToken = getAuthToken(admin.getEmail(), password);
+        String adminToken = getCachedAuthToken(admin.getEmail());
         getClient(adminToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -159,7 +266,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
 
     @Test
     public void adminSiteAdminRequiredSuccess() throws Exception {
-        String adminToken = getAuthToken(admin.getEmail(), password);
+        String adminToken = getCachedAuthToken(admin.getEmail());
         getClient(adminToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -172,7 +279,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
 
     @Test
     public void ePersonCollectionAdminRequiredNotFound() throws Exception {
-        String epersonToken = getAuthToken(eperson.getEmail(), password);
+        String epersonToken = getCachedAuthToken(eperson.getEmail());
         getClient(epersonToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -185,7 +292,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
 
     @Test
     public void ePersonCommunityAdminRequiredNotFound() throws Exception {
-        String epersonToken = getAuthToken(eperson.getEmail(), password);
+        String epersonToken = getCachedAuthToken(eperson.getEmail());
         getClient(epersonToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -198,7 +305,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
 
     @Test
     public void ePersonSiteAdminRequiredNotFound() throws Exception {
-        String epersonToken = getAuthToken(eperson.getEmail(), password);
+        String epersonToken = getCachedAuthToken(eperson.getEmail());
         getClient(epersonToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -213,7 +320,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
     public void ePersonCollectionAdminNotRequiredSuccess() throws Exception {
         configurationService.setProperty("usage-statistics.authorization.admin.workflow", false);
 
-        String epersonToken = getAuthToken(eperson.getEmail(), password);
+        String epersonToken = getCachedAuthToken(eperson.getEmail());
         getClient(epersonToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -228,7 +335,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
     public void ePersonCommunityAdminNotRequiredSuccess() throws Exception {
         configurationService.setProperty("usage-statistics.authorization.admin.workflow", false);
 
-        String epersonToken = getAuthToken(eperson.getEmail(), password);
+        String epersonToken = getCachedAuthToken(eperson.getEmail());
         getClient(epersonToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
@@ -243,7 +350,7 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
     public void ePersonSiteAdminNotRequiredSuccess() throws Exception {
         configurationService.setProperty("usage-statistics.authorization.admin.workflow", false);
 
-        String epersonToken = getAuthToken(eperson.getEmail(), password);
+        String epersonToken = getCachedAuthToken(eperson.getEmail());
         getClient(epersonToken).perform(
             get("/api/authz/authorizations/search/object")
                 .param("embed", "feature")
