@@ -47,8 +47,6 @@ import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.Site;
 import org.dspace.content.factory.ContentServiceFactory;
-import org.dspace.content.service.BitstreamService;
-import org.dspace.content.service.BundleService;
 import org.dspace.content.service.CollectionService;
 import org.dspace.content.service.CommunityService;
 import org.dspace.content.service.ItemService;
@@ -106,12 +104,6 @@ public class ViewUsageStatisticsFeatureIT extends AbstractControllerIntegrationT
     @Autowired
     private ItemService itemService;
 
-    @Autowired
-    private BundleService bundleService;
-
-    @Autowired
-    private BitstreamService bitstreamService;
-
     private Site site;
     private SiteRest siteRest;
     private Community communityA;
@@ -130,8 +122,6 @@ public class ViewUsageStatisticsFeatureIT extends AbstractControllerIntegrationT
     private static UUID communityAId;
     private static UUID collectionAId;
     private static UUID itemAId;
-    private static UUID bundleAId;
-    private static UUID bitstreamAId;
     private static boolean sharedFixturesCreated = false;
 
     // Auth token cache: shared fixtures persist across tests so JWT tokens remain valid
@@ -157,17 +147,6 @@ public class ViewUsageStatisticsFeatureIT extends AbstractControllerIntegrationT
             itemA = ItemBuilder.createItem(context, collectionA)
                 .withTitle("itemA")
                 .build();
-            bundleA = BundleBuilder.createBundle(context, itemA)
-                .withName("ORIGINAL")
-                .build();
-            String bitstreamContent = "Dummy content";
-            try (InputStream is = IOUtils.toInputStream(
-                bitstreamContent, CharEncoding.UTF_8)) {
-                bitstreamA = BitstreamBuilder
-                    .createBitstream(context, bundleA, is)
-                    .withName("bistreamA")
-                    .build();
-            }
 
             context.restoreAuthSystemState();
 
@@ -175,8 +154,6 @@ public class ViewUsageStatisticsFeatureIT extends AbstractControllerIntegrationT
             communityAId = communityA.getID();
             collectionAId = collectionA.getID();
             itemAId = itemA.getID();
-            bundleAId = bundleA.getID();
-            bitstreamAId = bitstreamA.getID();
 
             // Commit shared fixtures to the database
             context.commit();
@@ -191,9 +168,23 @@ public class ViewUsageStatisticsFeatureIT extends AbstractControllerIntegrationT
             communityA = communityService.find(context, communityAId);
             collectionA = collectionService.find(context, collectionAId);
             itemA = itemService.find(context, itemAId);
-            bundleA = bundleService.find(context, bundleAId);
-            bitstreamA = bitstreamService.find(context, bitstreamAId);
         }
+
+        // Create bundle and bitstream per test (cleaned up by
+        // AbstractBuilder after each test)
+        context.turnOffAuthorisationSystem();
+        bundleA = BundleBuilder.createBundle(context, itemA)
+            .withName("ORIGINAL")
+            .build();
+        String bitstreamContent = "Dummy content";
+        try (InputStream is = IOUtils.toInputStream(
+                bitstreamContent, CharEncoding.UTF_8)) {
+            bitstreamA = BitstreamBuilder
+                .createBitstream(context, bundleA, is)
+                .withName("bistreamA")
+                .build();
+        }
+        context.restoreAuthSystemState();
 
         // REST model conversions must happen after both branches since
         // they need session-attached entities

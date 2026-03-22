@@ -44,8 +44,6 @@ import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.Site;
 import org.dspace.content.factory.ContentServiceFactory;
-import org.dspace.content.service.BitstreamService;
-import org.dspace.content.service.BundleService;
 import org.dspace.content.service.CollectionService;
 import org.dspace.content.service.CommunityService;
 import org.dspace.content.service.ItemService;
@@ -96,12 +94,6 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
     @Autowired
     private ItemService itemService;
 
-    @Autowired
-    private BundleService bundleService;
-
-    @Autowired
-    private BitstreamService bitstreamService;
-
     private Site site;
     private SiteRest siteRest;
     private Community communityA;
@@ -119,8 +111,6 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
     private static UUID communityAId;
     private static UUID collectionAId;
     private static UUID itemAId;
-    private static UUID bundleAId;
-    private static UUID bitstreamAId;
     private static boolean sharedFixturesCreated = false;
 
     private static final Map<String, String> authTokenCache =
@@ -146,25 +136,12 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
             itemA = ItemBuilder.createItem(context, collectionA)
                 .withTitle("itemA")
                 .build();
-            bundleA = BundleBuilder.createBundle(context, itemA)
-                .withName("ORIGINAL")
-                .build();
-            String bitstreamContent = "Dummy content";
-            try (InputStream is = IOUtils.toInputStream(
-                    bitstreamContent, CharEncoding.UTF_8)) {
-                bitstreamA = BitstreamBuilder
-                    .createBitstream(context, bundleA, is)
-                    .withName("bistreamA")
-                    .build();
-            }
 
             context.restoreAuthSystemState();
 
             communityAId = communityA.getID();
             collectionAId = collectionA.getID();
             itemAId = itemA.getID();
-            bundleAId = bundleA.getID();
-            bitstreamAId = bitstreamA.getID();
 
             context.commit();
             AbstractBuilder.cleanupBuilderCache();
@@ -175,12 +152,25 @@ public class ViewWorkflowStatisticsFeatureIT extends AbstractControllerIntegrati
             collectionA = collectionService.find(context,
                 collectionAId);
             itemA = itemService.find(context, itemAId);
-            bundleA = bundleService.find(context, bundleAId);
-            bitstreamA = bitstreamService.find(context,
-                bitstreamAId);
         }
 
         eperson = context.reloadEntity(eperson);
+
+        // Create bundle and bitstream per test (cleaned up by
+        // AbstractBuilder after each test)
+        context.turnOffAuthorisationSystem();
+        bundleA = BundleBuilder.createBundle(context, itemA)
+            .withName("ORIGINAL")
+            .build();
+        String bitstreamContent = "Dummy content";
+        try (InputStream is = IOUtils.toInputStream(
+                bitstreamContent, CharEncoding.UTF_8)) {
+            bitstreamA = BitstreamBuilder
+                .createBitstream(context, bundleA, is)
+                .withName("bistreamA")
+                .build();
+        }
+        context.restoreAuthSystemState();
 
         siteRest = siteConverter.convert(site, Projection.DEFAULT);
         communityARest = communityConverter.convert(

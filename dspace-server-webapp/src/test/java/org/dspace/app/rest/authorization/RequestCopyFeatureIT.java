@@ -45,7 +45,6 @@ import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.WorkspaceItem;
 import org.dspace.content.factory.ContentServiceFactory;
-import org.dspace.content.service.BitstreamService;
 import org.dspace.content.service.CollectionService;
 import org.dspace.content.service.CommunityService;
 import org.dspace.content.service.ItemService;
@@ -93,9 +92,6 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
     private ItemService itemService;
 
     @Autowired
-    private BitstreamService bitstreamService;
-
-    @Autowired
     private Utils utils;
 
     private AuthorizationFeature requestCopyFeature;
@@ -114,11 +110,6 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
     private static UUID communityAId;
     private static UUID collectionAId;
     private static UUID itemAId;
-    private static UUID bitstreamAId;
-    private static UUID bitstreamBId;
-    private static UUID itemInWorkSpaceId;
-    private static UUID bitstreamFromWorkSpaceItemId;
-    private static UUID bitstreamFromCollectionId;
     private static boolean sharedFixturesCreated = false;
 
     private static final Map<String, String> authTokenCache =
@@ -136,43 +127,14 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
         if (!sharedFixturesCreated) {
             context.turnOffAuthorisationSystem();
 
-            String bitstreamContent = "Dummy content";
-
             Community communityA = CommunityBuilder
                 .createCommunity(context).build();
             collectionA = CollectionBuilder
                 .createCollection(context, communityA)
-                .withLogo("Blub").build();
-            bitstreamFromCollection = collectionA.getLogo();
+                .build();
 
             itemA = ItemBuilder.createItem(context, collectionA)
                 .build();
-
-            try (InputStream is = IOUtils.toInputStream(
-                    bitstreamContent, CharEncoding.UTF_8)) {
-                bitstreamA = BitstreamBuilder
-                    .createBitstream(context, itemA, is)
-                    .withName("Bitstream")
-                    .withDescription("Description")
-                    .withMimeType("text/plain")
-                    .build();
-                bitstreamB = BitstreamBuilder
-                    .createBitstream(context, itemA, is)
-                    .withName("Bitstream2")
-                    .withDescription("Description2")
-                    .withMimeType("text/plain")
-                    .build();
-                WorkspaceItem workspaceItem = WorkspaceItemBuilder
-                    .createWorkspaceItem(context, collectionA)
-                    .withFulltext("Test", "source", is)
-                    .build();
-                itemInWorkSpace = workspaceItem.getItem();
-                bitstreamFromWorkSpaceItem = itemInWorkSpace
-                    .getBundles("ORIGINAL").get(0)
-                    .getBitstreams().get(0);
-            }
-            resourcePolicyService.removePolicies(
-                context, bitstreamB, Constants.READ);
 
             context.restoreAuthSystemState();
 
@@ -180,13 +142,6 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
             communityAId = communityA.getID();
             collectionAId = collectionA.getID();
             itemAId = itemA.getID();
-            bitstreamAId = bitstreamA.getID();
-            bitstreamBId = bitstreamB.getID();
-            itemInWorkSpaceId = itemInWorkSpace.getID();
-            bitstreamFromWorkSpaceItemId =
-                bitstreamFromWorkSpaceItem.getID();
-            bitstreamFromCollectionId =
-                bitstreamFromCollection.getID();
 
             context.commit();
             AbstractBuilder.cleanupBuilderCache();
@@ -196,20 +151,44 @@ public class RequestCopyFeatureIT extends AbstractControllerIntegrationTest {
             collectionA = collectionService.find(context,
                 collectionAId);
             itemA = itemService.find(context, itemAId);
-            bitstreamA = bitstreamService.find(context,
-                bitstreamAId);
-            bitstreamB = bitstreamService.find(context,
-                bitstreamBId);
-            itemInWorkSpace = itemService.find(context,
-                itemInWorkSpaceId);
-            bitstreamFromWorkSpaceItem = bitstreamService.find(
-                context, bitstreamFromWorkSpaceItemId);
-            bitstreamFromCollection = bitstreamService.find(
-                context, bitstreamFromCollectionId);
         }
 
         // Reload eperson into current session
         eperson = context.reloadEntity(eperson);
+
+        // Create bitstreams and workspace item per test (cleaned
+        // up by AbstractBuilder after each test)
+        context.turnOffAuthorisationSystem();
+        String bitstreamContent = "Dummy content";
+        bitstreamFromCollection = collectionService.setLogo(
+            context, collectionA,
+            IOUtils.toInputStream("Blub", CharEncoding.UTF_8));
+        try (InputStream is = IOUtils.toInputStream(
+                bitstreamContent, CharEncoding.UTF_8)) {
+            bitstreamA = BitstreamBuilder
+                .createBitstream(context, itemA, is)
+                .withName("Bitstream")
+                .withDescription("Description")
+                .withMimeType("text/plain")
+                .build();
+            bitstreamB = BitstreamBuilder
+                .createBitstream(context, itemA, is)
+                .withName("Bitstream2")
+                .withDescription("Description2")
+                .withMimeType("text/plain")
+                .build();
+            WorkspaceItem workspaceItem = WorkspaceItemBuilder
+                .createWorkspaceItem(context, collectionA)
+                .withFulltext("Test", "source", is)
+                .build();
+            itemInWorkSpace = workspaceItem.getItem();
+            bitstreamFromWorkSpaceItem = itemInWorkSpace
+                .getBundles("ORIGINAL").get(0)
+                .getBitstreams().get(0);
+        }
+        resourcePolicyService.removePolicies(
+            context, bitstreamB, Constants.READ);
+        context.restoreAuthSystemState();
     }
 
     /**

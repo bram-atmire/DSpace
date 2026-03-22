@@ -47,8 +47,6 @@ import org.dspace.content.Collection;
 import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.factory.ContentServiceFactory;
-import org.dspace.content.service.BitstreamService;
-import org.dspace.content.service.BundleService;
 import org.dspace.content.service.CollectionService;
 import org.dspace.content.service.CommunityService;
 import org.dspace.content.service.ItemService;
@@ -102,12 +100,6 @@ public class CanManageMappingsFeatureIT extends AbstractControllerIntegrationTes
     @Autowired
     private ItemService itemService;
 
-    @Autowired
-    private BundleService bundleService;
-
-    @Autowired
-    private BitstreamService bitstreamService;
-
     private EPerson userA;
     private Community communityA;
     private Collection collectionA;
@@ -127,8 +119,6 @@ public class CanManageMappingsFeatureIT extends AbstractControllerIntegrationTes
     private static UUID collectionAId;
     private static UUID collectionBId;
     private static UUID itemAId;
-    private static UUID bundleAId;
-    private static UUID bitstreamAId;
     private static boolean sharedFixturesCreated = false;
 
     private static final Map<String, String> authTokenCache =
@@ -163,17 +153,6 @@ public class CanManageMappingsFeatureIT extends AbstractControllerIntegrationTes
             itemA = ItemBuilder.createItem(context, collectionA)
                 .withTitle("itemA")
                 .build();
-            bundleA = BundleBuilder.createBundle(context, itemA)
-                .withName("ORIGINAL")
-                .build();
-            String bitstreamContent = "Dummy content";
-            try (InputStream is = IOUtils.toInputStream(
-                    bitstreamContent, CharEncoding.UTF_8)) {
-                bitstreamA = BitstreamBuilder
-                    .createBitstream(context, bundleA, is)
-                    .withName("bistreamA")
-                    .build();
-            }
 
             context.restoreAuthSystemState();
 
@@ -183,8 +162,6 @@ public class CanManageMappingsFeatureIT extends AbstractControllerIntegrationTes
             collectionAId = collectionA.getID();
             collectionBId = collectionB.getID();
             itemAId = itemA.getID();
-            bundleAId = bundleA.getID();
-            bitstreamAId = bitstreamA.getID();
 
             context.commit();
             AbstractBuilder.cleanupBuilderCache();
@@ -199,13 +176,26 @@ public class CanManageMappingsFeatureIT extends AbstractControllerIntegrationTes
             collectionB = collectionService.find(context,
                 collectionBId);
             itemA = itemService.find(context, itemAId);
-            bundleA = bundleService.find(context, bundleAId);
-            bitstreamA = bitstreamService.find(context,
-                bitstreamAId);
         }
 
         // Reload eperson into current session
         eperson = context.reloadEntity(eperson);
+
+        // Create bundle and bitstream per test (cleaned up by
+        // AbstractBuilder after each test)
+        context.turnOffAuthorisationSystem();
+        bundleA = BundleBuilder.createBundle(context, itemA)
+            .withName("ORIGINAL")
+            .build();
+        String bitstreamContent = "Dummy content";
+        try (InputStream is = IOUtils.toInputStream(
+                bitstreamContent, CharEncoding.UTF_8)) {
+            bitstreamA = BitstreamBuilder
+                .createBitstream(context, bundleA, is)
+                .withName("bistreamA")
+                .build();
+        }
+        context.restoreAuthSystemState();
 
         // Convert to REST representations (needs session-attached
         // entities)

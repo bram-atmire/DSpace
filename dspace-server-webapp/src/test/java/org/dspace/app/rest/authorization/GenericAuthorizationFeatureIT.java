@@ -35,8 +35,6 @@ import org.dspace.content.Collection;
 import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.factory.ContentServiceFactory;
-import org.dspace.content.service.BitstreamService;
-import org.dspace.content.service.BundleService;
 import org.dspace.content.service.CollectionService;
 import org.dspace.content.service.CommunityService;
 import org.dspace.content.service.ItemService;
@@ -97,12 +95,6 @@ public class GenericAuthorizationFeatureIT extends AbstractControllerIntegration
     private ItemService itemService;
 
     @Autowired
-    private BundleService bundleService;
-
-    @Autowired
-    private BitstreamService bitstreamService;
-
-    @Autowired
     private GroupService groupService;
 
     @Autowired
@@ -139,10 +131,6 @@ public class GenericAuthorizationFeatureIT extends AbstractControllerIntegration
     private static UUID collectionYId;
     private static UUID item1Id;
     private static UUID item2Id;
-    private static UUID bundle1Id;
-    private static UUID bundle2Id;
-    private static UUID bitstream1Id;
-    private static UUID bitstream2Id;
     private static UUID item1AdminGroupId;
     private static UUID communityAAdminId;
     private static UUID collectionXAdminId;
@@ -212,17 +200,6 @@ public class GenericAuthorizationFeatureIT extends AbstractControllerIntegration
                 .withAuthor("Smith, Donald").withAuthor("Doe, John")
                 .withSubject("item1Entry")
                 .build();
-            bundle1 = BundleBuilder.createBundle(context, item1)
-                .withName("bundle1")
-                .build();
-            try (InputStream is = IOUtils.toInputStream("randomContent",
-                    CharEncoding.UTF_8)) {
-                bitstream1 = BitstreamBuilder
-                    .createBitstream(context, bundle1, is)
-                    .withName("bitstream1")
-                    .withMimeType("text/plain")
-                    .build();
-            }
 
             item1AdminGroup = GroupBuilder.createGroup(context)
                 .withName("item1AdminGroup")
@@ -266,17 +243,6 @@ public class GenericAuthorizationFeatureIT extends AbstractControllerIntegration
                 .withAuthor("Smith, Donald").withAuthor("Doe, John")
                 .withSubject("item2Entry")
                 .build();
-            bundle2 = BundleBuilder.createBundle(context, item2)
-                .withName("bundle2")
-                .build();
-            try (InputStream is = IOUtils.toInputStream("randomContent",
-                    CharEncoding.UTF_8)) {
-                bitstream2 = BitstreamBuilder
-                    .createBitstream(context, bundle2, is)
-                    .withName("bitstream2")
-                    .withMimeType("text/plain")
-                    .build();
-            }
 
             context.restoreAuthSystemState();
 
@@ -295,10 +261,6 @@ public class GenericAuthorizationFeatureIT extends AbstractControllerIntegration
             collectionYId = collectionY.getID();
             item1Id = item1.getID();
             item2Id = item2.getID();
-            bundle1Id = bundle1.getID();
-            bundle2Id = bundle2.getID();
-            bitstream1Id = bitstream1.getID();
-            bitstream2Id = bitstream2.getID();
             item1AdminGroupId = item1AdminGroup.getID();
 
             context.commit();
@@ -325,10 +287,6 @@ public class GenericAuthorizationFeatureIT extends AbstractControllerIntegration
             collectionY = collectionService.find(context, collectionYId);
             item1 = itemService.find(context, item1Id);
             item2 = itemService.find(context, item2Id);
-            bundle1 = bundleService.find(context, bundle1Id);
-            bundle2 = bundleService.find(context, bundle2Id);
-            bitstream1 = bitstreamService.find(context, bitstream1Id);
-            bitstream2 = bitstreamService.find(context, bitstream2Id);
             item1AdminGroup = groupService.find(context,
                 item1AdminGroupId);
 
@@ -350,6 +308,33 @@ public class GenericAuthorizationFeatureIT extends AbstractControllerIntegration
             indexingService.indexContent(context,
                 new IndexableItem(item2), true, true);
         }
+
+        // Create bundles and bitstreams per test (cleaned up by
+        // AbstractBuilder after each test)
+        context.turnOffAuthorisationSystem();
+        bundle1 = BundleBuilder.createBundle(context, item1)
+            .withName("bundle1")
+            .build();
+        try (InputStream is = IOUtils.toInputStream(
+                "randomContent", CharEncoding.UTF_8)) {
+            bitstream1 = BitstreamBuilder
+                .createBitstream(context, bundle1, is)
+                .withName("bitstream1")
+                .withMimeType("text/plain")
+                .build();
+        }
+        bundle2 = BundleBuilder.createBundle(context, item2)
+            .withName("bundle2")
+            .build();
+        try (InputStream is = IOUtils.toInputStream(
+                "randomContent", CharEncoding.UTF_8)) {
+            bitstream2 = BitstreamBuilder
+                .createBitstream(context, bundle2, is)
+                .withName("bitstream2")
+                .withMimeType("text/plain")
+                .build();
+        }
+        context.restoreAuthSystemState();
 
         // Reload eperson into current session to avoid stale proxy
         eperson = context.reloadEntity(eperson);

@@ -43,7 +43,6 @@ import org.dspace.content.Collection;
 import org.dspace.content.Community;
 import org.dspace.content.Item;
 import org.dspace.content.factory.ContentServiceFactory;
-import org.dspace.content.service.BitstreamService;
 import org.dspace.content.service.CollectionService;
 import org.dspace.content.service.CommunityService;
 import org.dspace.content.service.ItemService;
@@ -86,9 +85,6 @@ public class DownloadFeatureIT extends AbstractControllerIntegrationTest {
     private ItemService itemService;
 
     @Autowired
-    private BitstreamService bitstreamService;
-
-    @Autowired
     private Utils utils;
 
     private AuthorizationFeature downloadFeature;
@@ -102,8 +98,6 @@ public class DownloadFeatureIT extends AbstractControllerIntegrationTest {
     private static UUID communityAId;
     private static UUID collectionAId;
     private static UUID itemAId;
-    private static UUID bitstreamAId;
-    private static UUID bitstreamBId;
     private static boolean sharedFixturesCreated = false;
 
     private static final Map<String, String> authTokenCache =
@@ -120,8 +114,6 @@ public class DownloadFeatureIT extends AbstractControllerIntegrationTest {
         if (!sharedFixturesCreated) {
             context.turnOffAuthorisationSystem();
 
-            String bitstreamContent = "Dummy content";
-
             Community communityA = CommunityBuilder
                 .createCommunity(context).build();
             collectionA = CollectionBuilder
@@ -131,32 +123,12 @@ public class DownloadFeatureIT extends AbstractControllerIntegrationTest {
             itemA = ItemBuilder.createItem(context, collectionA)
                 .build();
 
-            try (InputStream is = IOUtils.toInputStream(
-                    bitstreamContent, CharEncoding.UTF_8)) {
-                bitstreamA = BitstreamBuilder
-                    .createBitstream(context, itemA, is)
-                    .withName("Bitstream")
-                    .withDescription("Description")
-                    .withMimeType("text/plain")
-                    .build();
-                bitstreamB = BitstreamBuilder
-                    .createBitstream(context, itemA, is)
-                    .withName("Bitstream2")
-                    .withDescription("Description2")
-                    .withMimeType("text/plain")
-                    .build();
-            }
-            resourcePolicyService.removePolicies(
-                context, bitstreamB, Constants.READ);
-
             context.restoreAuthSystemState();
 
             // Store UUIDs for reloading
             communityAId = communityA.getID();
             collectionAId = collectionA.getID();
             itemAId = itemA.getID();
-            bitstreamAId = bitstreamA.getID();
-            bitstreamBId = bitstreamB.getID();
 
             context.commit();
             AbstractBuilder.cleanupBuilderCache();
@@ -166,14 +138,33 @@ public class DownloadFeatureIT extends AbstractControllerIntegrationTest {
             collectionA = collectionService.find(context,
                 collectionAId);
             itemA = itemService.find(context, itemAId);
-            bitstreamA = bitstreamService.find(context,
-                bitstreamAId);
-            bitstreamB = bitstreamService.find(context,
-                bitstreamBId);
         }
 
         // Reload eperson into current session
         eperson = context.reloadEntity(eperson);
+
+        // Create bitstreams per test (cleaned up by
+        // AbstractBuilder after each test)
+        context.turnOffAuthorisationSystem();
+        String bitstreamContent = "Dummy content";
+        try (InputStream is = IOUtils.toInputStream(
+                bitstreamContent, CharEncoding.UTF_8)) {
+            bitstreamA = BitstreamBuilder
+                .createBitstream(context, itemA, is)
+                .withName("Bitstream")
+                .withDescription("Description")
+                .withMimeType("text/plain")
+                .build();
+            bitstreamB = BitstreamBuilder
+                .createBitstream(context, itemA, is)
+                .withName("Bitstream2")
+                .withDescription("Description2")
+                .withMimeType("text/plain")
+                .build();
+        }
+        resourcePolicyService.removePolicies(
+            context, bitstreamB, Constants.READ);
+        context.restoreAuthSystemState();
     }
 
     /**
