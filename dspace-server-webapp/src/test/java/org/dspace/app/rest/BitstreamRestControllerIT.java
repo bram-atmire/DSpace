@@ -255,6 +255,8 @@ public class BitstreamRestControllerIT extends AbstractControllerIntegrationTest
                        //The Content Length must match the full length
                        .andExpect(header().longValue("Content-Length", bitstreamContent.getBytes().length))
                        .andExpect(header().string("Content-Type", "text/plain;charset=UTF-8"))
+                       .andExpect(header().string("Link", "<" + configurationService.getProperty("dspace.ui.url")
+                               + "/bitstreams/" + bitstream.getID() + "/download>; rel=\"canonical\""))
                        .andExpect(header().string("ETag", "\"" + bitstream.getChecksum() + "\""))
                        .andExpect(content().bytes(new byte[] {}));
 
@@ -273,6 +275,8 @@ public class BitstreamRestControllerIT extends AbstractControllerIntegrationTest
                        // We're checking this with quotes because it is required:
                        // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/ETag
                        .andExpect(header().string("ETag", "\"" + bitstream.getChecksum() + "\""))
+                       .andExpect(header().string("Link", "<" + configurationService.getProperty("dspace.ui.url")
+                               + "/bitstreams/" + bitstream.getID() + "/download>; rel=\"canonical\""))
                        //We expect the content type to match the bitstream mime type
                        .andExpect(content().contentType("text/plain;charset=UTF-8"))
                        //THe bytes of the content must match the original content
@@ -285,6 +289,17 @@ public class BitstreamRestControllerIT extends AbstractControllerIntegrationTest
 
             //The download and head request should also be logged as a statistics record
             checkNumberOfStatsRecords(bitstream, 3);
+
+            boolean canonicalLinksEnabled = configurationService
+                    .getBooleanProperty("seo.canonical.bitstreams", true);
+            configurationService.setProperty("seo.canonical.bitstreams", false);
+            try {
+                getClient().perform(get("/api/core/bitstreams/" + bitstream.getID() + "/content"))
+                           .andExpect(status().isOk())
+                           .andExpect(header().doesNotExist("Link"));
+            } finally {
+                configurationService.setProperty("seo.canonical.bitstreams", canonicalLinksEnabled);
+            }
     }
 
     @Test

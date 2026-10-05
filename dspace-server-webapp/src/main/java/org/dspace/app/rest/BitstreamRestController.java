@@ -52,6 +52,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.util.UriComponentsBuilder;
 
 /**
  * This is a specialized controller to provide access to the bitstream binary
@@ -240,6 +241,15 @@ public class BitstreamRestController {
             // Send the data
             if (httpHeadersInitializer.isValid()) {
                 HttpHeaders httpHeaders = httpHeadersInitializer.initialiseHeaders();
+
+                if (configurationService.getBooleanProperty("seo.canonical.bitstreams", true)) {
+                    String canonicalUrl = UriComponentsBuilder
+                            .fromUriString(configurationService.getProperty("dspace.ui.url"))
+                            .pathSegment("bitstreams", bit.getID().toString(), "download")
+                            .build()
+                            .toUriString();
+                    httpHeaders.add(HttpHeaders.LINK, "<" + canonicalUrl + ">; rel=\"canonical\"");
+                }
 
                 if (RequestMethod.HEAD.name().equals(request.getMethod())) {
                     log.debug("HEAD request - no response body");
